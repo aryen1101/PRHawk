@@ -21,7 +21,7 @@ export const riskSummarySchema = z.object({
 })
 
 export const reviewResultSchema = z.object({
-    summaru : riskSummarySchema,
+    summary : riskSummarySchema,
     comments : z.array(inlineCommentSchema)
 })
 
