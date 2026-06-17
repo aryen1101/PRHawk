@@ -29,8 +29,9 @@ export function parseUrl(url: string): PullRequestRef {
 
 export async function fetchPullRequest(
   ref: PullRequestRef,
+  customToken?: string,
 ): Promise<{ pr: PrInfo; files: PrFile[] }> {
-  const client = getOctokitClient();
+  const client = getOctokitClient(customToken);
   const { data: pr } = await client.pulls.get({
     owner: ref.owner,
     repo: ref.repo,
@@ -49,8 +50,9 @@ export async function buildFileContexts(
   ref: PullRequestRef,
   pr: PrInfo,
   files: PrFile[],
+  customToken?: string,
 ): Promise<FileContext[]> {
-  const client = getOctokitClient();
+  const client = getOctokitClient(customToken);
   const contexts: FileContext[] = [];
 
   for (const f of files) {

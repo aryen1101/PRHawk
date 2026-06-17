@@ -8,7 +8,7 @@ import {
 } from "./github/prService.js";
 import { postReview } from "./github/reviewPublishers.js";
 import { reviewDiff } from "./review/reviewer.js";
-import { loadConventions } from "./conventions/store.js";
+import { loadConventions, saveCoventions } from "./conventions/store.js";
 import { learnConventions } from "./conventions/learner.js";
 import { config } from "./config.js";
 
@@ -27,19 +27,7 @@ function startServer(): void {
   const dir = path.dirname(fileURLToPath(import.meta.url));
   app.use(express.static(path.join(dir, "..", "..", "frontend", "dist")));
   app.get("/api/auth-required", (_req, res) => {
-    res.json({ authRequired: config.accessKey.length > 0 });
-  });
-
-  app.use("/api", (req, res, next) => {
-    if (!config.accessKey) {
-      next();
-      return;
-    }
-    if (req.header("x-access-key") === config.accessKey) {
-      next();
-      return;
-    }
-    res.status(401).json({ error: "Invalid or missing access key." });
+    res.json({ authRequired: false });
   });
 
   app.post("/api/review", async (req, res) => {
@@ -50,17 +38,21 @@ function startServer(): void {
         return;
       }
 
+      const customToken = req.header("x-github-token") || undefined;
+      const customLlmKey = req.header("x-openrouter-key") || undefined;
+      const customLlmBase = customLlmKey ? "https://openrouter.ai/api/v1" : undefined;
+
       const ref = parseUrl(url.trim());
-      const { pr, files } = await fetchPullRequest(ref);
-      const contexts = await buildFileContexts(ref, pr, files);
+      const { pr, files } = await fetchPullRequest(ref, customToken);
+      const contexts = await buildFileContexts(ref, pr, files, customToken);
       if (contexts.length === 0) {
         res.json({ summary: null, comments: [], message: "No reviewable changes found in this PR." });
         return;
       }
 
       const conventions = await loadConventions();
-      const result = await reviewDiff(pr.title ?? "", pr.body ?? "", contexts, conventions);
-      await postReview(ref, pr.head.sha, result);
+      const result = await reviewDiff(pr.title ?? "", pr.body ?? "", contexts, conventions, customLlmKey, customLlmBase);
+      await postReview(ref, pr.head.sha, result, customToken);
 
       res.json({ ...result, conventionsUsed: conventions.length, prUrl: url.trim() });
     } catch (err) {
@@ -76,8 +68,36 @@ function startServer(): void {
         res.status(400).json({ error: "Provide a repo as 'owner/repo' or a GitHub URL." });
         return;
       }
-      const rules = await learnConventions(parsed.owner, parsed.repo);
+
+      const customToken = req.header("x-github-token") || undefined;
+      const customLlmKey = req.header("x-openrouter-key") || undefined;
+      const customLlmBase = customLlmKey ? "https://openrouter.ai/api/v1" : undefined;
+
+      const rules = await learnConventions(parsed.owner, parsed.repo, customToken, customLlmKey, customLlmBase);
       res.json({ rules });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.get("/api/conventions", async (_req, res) => {
+    try {
+      const rules = await loadConventions();
+      res.json({ rules });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.put("/api/conventions", async (req, res) => {
+    try {
+      const rules = req.body?.rules;
+      if (!Array.isArray(rules)) {
+        res.status(400).json({ error: "Provide rules as an array." });
+        return;
+      }
+      await saveCoventions(rules);
+      res.json({ success: true, rules });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }

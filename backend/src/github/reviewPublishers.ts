@@ -24,8 +24,9 @@ export async function postReview(
   ref: PullRequestRef,
   headSha: string,
   result: ReviewResult,
+  customToken?: string,
 ): Promise<void> {
-  const client = getOctokitClient();
+  const client = getOctokitClient(customToken);
 
   const comments = result.comments.map((c) => ({
     path: c.path,

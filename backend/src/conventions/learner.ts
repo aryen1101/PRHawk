@@ -14,8 +14,11 @@ const MAX_SAMPLE_CHARS = 5000;
 export async function learnConventions(
   owner: string,
   repo: string,
+  customToken?: string,
+  customLlmKey?: string,
+  customLlmBase?: string,
 ): Promise<ConventionRule[]> {
-  const client = getOctokitClient();
+  const client = getOctokitClient(customToken);
 
   const { data: pulls } = await client.pulls.list({
     owner,
@@ -51,6 +54,8 @@ export async function learnConventions(
     buildConventionsSystemPrompt(),
     buildConventionsUserPrompt(samples),
     conventionsSchema,
+    customLlmKey,
+    customLlmBase,
   );
 
   const rules = result.rules ?? [];

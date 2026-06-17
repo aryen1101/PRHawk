@@ -8,11 +8,15 @@ export async function reviewDiff(
   prBody: string,
   contexts: FileContext[],
   conventions: ConventionRule[],
+  customLlmKey?: string,
+  customLlmBase?: string,
 ): Promise<ReviewResult> {
   const result = await complete(
     buildReviewSystemPrompt(conventions),
     buildReviewUserPrompt(prTitle, prBody, contexts),
     reviewResultSchema,
+    customLlmKey,
+    customLlmBase,
   );
 
   return cleanResult(result, contexts);
