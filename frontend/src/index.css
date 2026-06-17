@@ -766,7 +766,7 @@ button, input, textarea, select {
 }
 
 .file-header {
-  padding: 1rem 1.25rem;
+  padding: 0.875rem 1.25rem;
   background-color: var(--surface-alt);
   border-bottom: 1px solid var(--border);
   display: flex;
@@ -776,6 +776,17 @@ button, input, textarea, select {
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--t2);
+}
+
+.file-comment-count {
+  margin-left: auto;
+  background-color: var(--border);
+  color: var(--t2);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.1rem 0.5rem;
+  border-radius: 50px;
+  font-family: var(--font-sans);
 }
 
 .file-icon {
@@ -787,157 +798,190 @@ button, input, textarea, select {
   flex-direction: column;
 }
 
-/* Inline Comment Card */
-.inline-comment-wrapper {
+/* ─── Diagnostic Comment Card ─────────────────────────────────────── */
+.diagnostic-card {
+  display: flex;
   border-bottom: 1px solid var(--border);
+  transition: background-color var(--transition-fast);
 }
 
-.inline-comment-wrapper:last-child {
+.diagnostic-card:last-child {
   border-bottom: none;
 }
 
-.diff-preview {
-  background-color: var(--surface-alt);
-  font-family: var(--font-mono);
-  font-size: 0.85rem;
-  padding: 1rem 1.25rem;
-  border-bottom: 1px solid var(--border);
-  color: var(--t2);
-  overflow-x: auto;
-  white-space: pre;
+.diagnostic-card:hover {
+  background-color: var(--surface-hover);
 }
 
-.diff-line {
-  display: flex;
-  gap: 1rem;
+/* Severity accent bar */
+.diag-accent-bar {
+  width: 4px;
+  flex-shrink: 0;
+  border-radius: 0;
 }
 
-.diff-line.added {
-  background-color: rgba(45, 122, 77, 0.08);
-  color: var(--color-safe);
-}
+.diagnostic-card.sev-bug        .diag-accent-bar { background-color: var(--color-bug); }
+.diagnostic-card.sev-security   .diag-accent-bar { background-color: var(--color-security); }
+.diagnostic-card.sev-performance .diag-accent-bar { background-color: var(--color-performance); }
+.diagnostic-card.sev-style      .diag-accent-bar { background-color: var(--terra); }
+.diagnostic-card.sev-suggestion  .diag-accent-bar { background-color: var(--terra); }
 
-.diff-line-num {
-  width: 40px;
-  color: var(--t3);
-  text-align: right;
-  user-select: none;
-}
-
-.diff-line-content {
+/* Card body */
+.diag-body {
   flex: 1;
-}
-
-.comment-block {
-  padding: 1.5rem;
-  background-color: var(--surface);
+  padding: 1.35rem 1.5rem 1.5rem;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.9rem;
 }
 
-.comment-meta {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.comment-meta-left {
+/* Header row */
+.diag-header {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
 }
 
-.comment-line-indicator {
-  font-size: 0.8rem;
-  font-weight: 600;
+.diag-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.diag-line-pill {
+  font-size: 0.72rem;
+  font-weight: 700;
   color: var(--t3);
   background-color: var(--surface-alt);
-  padding: 0.15rem 0.5rem;
-  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  padding: 0.15rem 0.55rem;
+  border-radius: 50px;
   font-family: var(--font-mono);
+  letter-spacing: 0.02em;
 }
 
-.comment-body {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.comment-issue {
+/* Issue title */
+.diag-issue {
   font-size: 1.05rem;
   font-weight: 700;
   color: var(--t1);
+  letter-spacing: -0.015em;
+  line-height: 1.4;
 }
 
-.comment-detail-box {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 1.5rem;
-}
-
-@media (max-width: 768px) {
-  .comment-detail-box {
-    grid-template-columns: 1fr;
-    gap: 1rem;
-  }
-}
-
-.comment-detail-item {
+/* Why It Matters callout */
+.diag-why {
+  border-radius: var(--r-md);
+  padding: 0.85rem 1rem;
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+  border: 1px solid transparent;
 }
 
-.comment-detail-label {
-  font-size: 0.75rem;
+/* All callout backgrounds use warm tones — no cool blues allowed */
+.sev-bg-bug,
+.sev-bg-security {
+  background-color: rgba(184, 74, 34, 0.06);
+  border-color: rgba(184, 74, 34, 0.18);
+}
+
+.sev-bg-performance {
+  background-color: rgba(148, 100, 34, 0.06);
+  border-color: rgba(148, 100, 34, 0.18);
+}
+
+/* Style & suggestion use the same warm neutral — keeps theme cohesive */
+.sev-bg-style {
+  background-color: rgba(99, 87, 79, 0.06);
+  border-color: rgba(99, 87, 79, 0.15);
+}
+
+.sev-bg-suggestion {
+  background-color: rgba(99, 87, 79, 0.05);
+  border-color: rgba(99, 87, 79, 0.12);
+}
+
+.diag-why-label {
+  font-size: 0.72rem;
   font-weight: 700;
   text-transform: uppercase;
-  color: var(--t3);
-  letter-spacing: 0.05em;
+  letter-spacing: 0.07em;
+  color: var(--t2);
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 
-.comment-detail-text {
-  font-size: 0.9rem;
+.diag-why-text {
+  font-size: 0.875rem;
+  color: var(--t1);
+  line-height: 1.65;
+  margin: 0;
+  font-weight: 400;
+}
+
+/* Suggested Fix IDE Panel */
+.diag-fix-panel {
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  background-color: var(--surface-alt);
+}
+
+.diag-fix-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.85rem;
+  background-color: var(--surface-alt);
+  border-bottom: 1px solid var(--border);
+}
+
+.diag-fix-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
   color: var(--t2);
 }
 
-.code-fix-block {
-  background-color: var(--surface-alt);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: 0.75rem 2.5rem 0.75rem 1rem;
+.diag-copy-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.73rem;
+  font-weight: 600;
+  color: var(--terra);
+  background: var(--terra-dim);
+  border: 1px solid rgba(184, 74, 34, 0.2);
+  border-radius: var(--r-sm);
+  padding: 0.22rem 0.6rem;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: var(--font-sans);
+}
+
+.diag-copy-btn:hover {
+  background-color: rgba(184, 74, 34, 0.15);
+  border-color: var(--terra);
+  color: var(--terra-hover);
+}
+
+.diag-fix-code {
+  margin: 0;
+  padding: 0.9rem 1.1rem;
   font-family: var(--font-mono);
-  font-size: 0.85rem;
+  font-size: 0.81rem;
   color: var(--t1);
+  background-color: var(--bg);
   overflow-x: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  margin-top: 0.25rem;
-  position: relative;
-}
-
-.copy-fix-btn {
-  position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  background-color: var(--surface);
-  border: 1px solid var(--border);
-  color: var(--t2);
-  width: 28px;
-  height: 28px;
-  border-radius: var(--r-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.copy-fix-btn:hover {
-  background-color: var(--surface-hover);
-  color: var(--t1);
-  border-color: var(--border-mid);
+  line-height: 1.75;
+  border-top: none;
 }
 
 /* Empty State styling */

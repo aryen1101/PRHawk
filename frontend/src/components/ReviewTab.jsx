@@ -12,7 +12,9 @@ import {
   Clock, 
   Info,
   ChevronRight,
-  Code
+  Code,
+  Lightbulb,
+  Zap
 } from "lucide-react";
 
 export default function ReviewTab({ accessKey, addToast }) {
@@ -329,46 +331,56 @@ export default function ReviewTab({ accessKey, addToast }) {
               <div className="file-header">
                 <FileText size={16} className="file-icon" />
                 <span>{filePath}</span>
+                <span className="file-comment-count">{commentsByFile[filePath].length}</span>
               </div>
               
               <div className="file-comments-container">
                 {commentsByFile[filePath].map((comment, index) => {
                   const globalIndex = result.comments.indexOf(comment);
                   return (
-                    <div key={index} className="inline-comment-wrapper">
-                      <div className="comment-block">
-                        <div className="comment-meta">
-                          <div className="comment-meta-left">
+                    <div key={index} className={`diagnostic-card sev-${comment.severity}`}>
+                      {/* Colored severity accent bar */}
+                      <div className="diag-accent-bar" />
+
+                      <div className="diag-body">
+                        {/* Card Header: badge + line pill */}
+                        <div className="diag-header">
+                          <div className="diag-header-left">
                             <span className={`badge badge-${comment.severity}`}>{comment.severity}</span>
-                            <span className="comment-line-indicator">Line {comment.line}</span>
+                            <span className="diag-line-pill">L{comment.line}</span>
                           </div>
                         </div>
 
-                        <div className="comment-body">
-                          <div className="comment-issue">{comment.issue}</div>
-                          
-                          <div className="comment-detail-box">
-                            <div className="comment-detail-item">
-                              <span className="comment-detail-label">Why It Matters</span>
-                              <div className="comment-detail-text">{comment.whyItMatters}</div>
-                            </div>
+                        {/* Issue Title */}
+                        <div className="diag-issue">{comment.issue}</div>
 
-                            <div className="comment-detail-item">
-                              <span className="comment-detail-label">Actionable Suggested Fix</span>
-                              <div style={{ position: "relative" }}>
-                                <div className="code-fix-block">
-                                  {comment.suggestedFix}
-                                </div>
-                                <button 
-                                  className="copy-fix-btn"
-                                  onClick={() => copyToClipboard(comment.suggestedFix, globalIndex)}
-                                  title="Copy suggested fix"
-                                >
-                                  {copiedIndex === globalIndex ? <Check size={14} style={{ color: "var(--color-safe)" }} /> : <Copy size={14} />}
-                                </button>
-                              </div>
-                            </div>
+                        {/* Why It Matters — tinted callout */}
+                        <div className={`diag-why sev-bg-${comment.severity}`}>
+                          <div className="diag-why-label">
+                            <Lightbulb size={13} />
+                            Why it matters
                           </div>
+                          <p className="diag-why-text">{comment.whyItMatters}</p>
+                        </div>
+
+                        {/* Suggested Fix — IDE-style code panel */}
+                        <div className="diag-fix-panel">
+                          <div className="diag-fix-header">
+                            <div className="diag-fix-header-left">
+                              <Zap size={13} />
+                              Suggested Fix
+                            </div>
+                            <button
+                              className="diag-copy-btn"
+                              onClick={() => copyToClipboard(comment.suggestedFix, globalIndex)}
+                              title="Copy fix"
+                            >
+                              {copiedIndex === globalIndex
+                                ? <><Check size={13} /> Copied</>
+                                : <><Copy size={13} /> Copy</>}
+                            </button>
+                          </div>
+                          <pre className="diag-fix-code">{comment.suggestedFix}</pre>
                         </div>
                       </div>
                     </div>
