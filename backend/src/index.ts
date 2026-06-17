@@ -8,7 +8,7 @@ import {
 } from "./github/prService.js";
 import { postReview } from "./github/reviewPublishers.js";
 import { reviewDiff } from "./review/reviewer.js";
-import { loadConventions } from "./conventions/store.js";
+import { loadConventions, saveCoventions } from "./conventions/store.js";
 import { learnConventions } from "./conventions/learner.js";
 import { config } from "./config.js";
 
@@ -78,6 +78,29 @@ function startServer(): void {
       }
       const rules = await learnConventions(parsed.owner, parsed.repo);
       res.json({ rules });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.get("/api/conventions", async (_req, res) => {
+    try {
+      const rules = await loadConventions();
+      res.json({ rules });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.put("/api/conventions", async (req, res) => {
+    try {
+      const rules = req.body?.rules;
+      if (!Array.isArray(rules)) {
+        res.status(400).json({ error: "Provide rules as an array." });
+        return;
+      }
+      await saveCoventions(rules);
+      res.json({ success: true, rules });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
