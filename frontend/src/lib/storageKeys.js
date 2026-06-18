@@ -13,3 +13,18 @@ export const STORAGE_KEYS = {
   reviewResult: "prhawk_review_result",
   reviewUrl: "prhawk_review_url",
 };
+
+// Per-user state held in localStorage (shared across the whole browser).
+// Must be cleared on login/logout so one account's data does not leak into
+// another account's session on the same browser.
+const SESSION_SCOPED_KEYS = [
+  STORAGE_KEYS.activeTab,
+  STORAGE_KEYS.reviewResult,
+  STORAGE_KEYS.reviewUrl,
+];
+
+export function clearSessionScopedState() {
+  for (const key of SESSION_SCOPED_KEYS) {
+    localStorage.removeItem(key);
+  }
+}

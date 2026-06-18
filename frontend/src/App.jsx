@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Routes, Route, useNavigate } from "react-router-dom";
 import { authClient } from "./lib/auth";
-import { STORAGE_KEYS } from "./lib/storageKeys";
+import { STORAGE_KEYS, clearSessionScopedState } from "./lib/storageKeys";
 import usePersistentState from "./hooks/usePersistentState";
 import ReviewTab from "./components/ReviewTab";
 import RulesTab from "./components/RulesTab";
@@ -43,6 +43,7 @@ function Dashboard() {
 
   const handleLogout = async () => {
     await authClient.signOut();
+    clearSessionScopedState(); // don't leak this user's review into the next login
     navigate("/login", { replace: true });
   };
 

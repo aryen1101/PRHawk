@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { authClient } from "../lib/auth";
+import { clearSessionScopedState } from "../lib/storageKeys";
 import { Mail, Lock, ArrowRight, AlertCircle, Eye, EyeOff } from "lucide-react";
 
 export default function LoginPage() {
@@ -30,6 +31,7 @@ export default function LoginPage() {
       if (authError) {
         setError(authError.message || "Invalid email or password.");
       } else {
+        clearSessionScopedState(); // start this account with a clean dashboard
         window.location.href = "/";
         return;
       }

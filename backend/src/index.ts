@@ -32,10 +32,7 @@ const allowedOrigins = (
 function startServer(): void {
   const app = express();
 
-  // CORS must run first so every response — including better-auth's — carries
-  // the headers, and cross-origin preflight is answered. Credentials are
-  // allowed because better-auth uses session cookies (which also requires a
-  // specific origin, never "*").
+
   app.use((req, res, next) => {
     const origin = req.header("origin");
     if (origin && allowedOrigins.includes(origin)) {
@@ -55,8 +52,7 @@ function startServer(): void {
     next();
   });
 
-  // better-auth handler runs before express.json() because it parses its own
-  // request body; mounting json() first would consume it.
+
   app.all("/api/auth/*splat", toNodeHandler(auth));
 
   app.use(express.json());

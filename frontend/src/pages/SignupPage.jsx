@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { authClient } from "../lib/auth";
+import { clearSessionScopedState } from "../lib/storageKeys";
 import {
   Mail, Lock, User, ArrowRight, AlertCircle, Eye, EyeOff, Check,
 } from "lucide-react";
@@ -63,6 +64,7 @@ export default function SignupPage() {
         setError(authError.message || "Could not create account. Try again.");
       } else {
         // Auto-login after signup: better-auth sets the session cookie on signUp
+        clearSessionScopedState(); // start this account with a clean dashboard
         window.location.href = "/";
         return;
       }
