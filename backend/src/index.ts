@@ -32,7 +32,6 @@ const allowedOrigins = (
 
 function startServer(): void {
   const app = express();
-
   app.all("/api/auth/*splat", toNodeHandler(auth));
 
 
