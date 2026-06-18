@@ -24,6 +24,7 @@ export const config = {
 
     conventionsPath : "conventions/rules.json",
     maxFilesContextChars : 12000,
-    maxMergedPr : 10
+    maxMergedPr : 10,
+    mongoUri : process.env.MONGODB_URL || ""
 
 }
