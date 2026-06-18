@@ -32,9 +32,9 @@ const allowedOrigins = (
 
 function startServer(): void {
   const app = express();
-  app.all("/api/auth/*splat", toNodeHandler(auth));
 
-
+  // CORS middleware MUST be before all route handlers (including better-auth)
+  // so that preflight OPTIONS requests get proper CORS headers.
   app.use((req, res, next) => {
     const origin = req.header("origin");
     if (origin && allowedOrigins.includes(origin)) {
@@ -45,6 +45,7 @@ function startServer(): void {
         "Access-Control-Allow-Headers",
         "Content-Type,x-access-key,x-github-token,x-openrouter-key"
       );
+      res.header("Access-Control-Allow-Credentials", "true");
     }
     if (req.method === "OPTIONS") {
       res.sendStatus(204);
@@ -52,6 +53,8 @@ function startServer(): void {
     }
     next();
   });
+
+  app.all("/api/auth/*splat", toNodeHandler(auth));
 
   app.use(express.json());
 
