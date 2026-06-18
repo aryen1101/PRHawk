@@ -33,7 +33,7 @@ export default function LoginPage() {
         window.location.href = "/";
         return;
       }
-    } catch (err) {
+    } catch {
       setError("Something went wrong. Please try again.");
     } finally {
       setLoading(false);

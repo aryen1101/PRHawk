@@ -23,8 +23,7 @@ function parseRepo(target: string): { owner: string; repo: string } | null {
 }
 
 const allowedOrigins = (
- 
-  "https://pr-hawk.vercel.app,http://localhost:3000"
+  "https://pr-hawk.vercel.app,http://localhost:5173,http://localhost:3000"
 )
   .split(",")
   .map((o) => o.trim())
@@ -32,13 +31,11 @@ const allowedOrigins = (
 
 function startServer(): void {
   const app = express();
-
-  // CORS middleware MUST be before all route handlers (including better-auth)
-  // so that preflight OPTIONS requests get proper CORS headers.
   app.use((req, res, next) => {
     const origin = req.header("origin");
     if (origin && allowedOrigins.includes(origin)) {
       res.header("Access-Control-Allow-Origin", origin);
+      res.header("Access-Control-Allow-Credentials", "true");
       res.header("Vary", "Origin");
       res.header("Access-Control-Allow-Methods", "GET,POST,PUT,OPTIONS");
       res.header(
@@ -87,9 +84,6 @@ function startServer(): void {
       const conventions = await loadConventions();
       const result = await reviewDiff(pr.title ?? "", pr.body ?? "", contexts, conventions, customLlmKey, customLlmBase);
 
-      // Posting to GitHub requires a token with PR-write access. If it fails
-      // (e.g. read-only/insufficient token), still return the generated review
-      // so the user sees it in the UI, with a warning explaining the post failed.
       let postWarning: string | undefined;
       try {
         await postReview(ref, pr.head.sha, result, customToken);
