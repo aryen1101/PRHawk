@@ -33,7 +33,7 @@ export async function complete<T extends z.ZodTypeAny>(
   const response = await getOpenAIClient(customKey, customBaseURL).chat.completions.create({
     model: config.model,
     temperature: 0.2,
-    max_tokens: 3000,
+    max_tokens: 8000,
     response_format: { type: "json_object" },
     messages: [
       {
@@ -46,10 +46,49 @@ export async function complete<T extends z.ZodTypeAny>(
     ],
   });
 
-  const text = response.choices[0]?.message?.content;
-  if(!text){
+  const choice = response.choices[0];
+  const text = choice?.message?.content;
+  if (!text) {
     throw new Error("The model returned an empty response.");
   }
 
-  return schema.parse(JSON.parse(text));
+  // The model ran out of output tokens before closing the JSON, which yields
+  // truncated text like an unterminated string. Surface a clear, actionable error.
+  if (choice?.finish_reason === "length") {
+    throw new Error(
+      "The model's response was cut off before it finished (output token limit reached). " +
+        "Try reviewing a smaller pull request.",
+    );
+  }
+
+  const cleaned = extractJson(text);
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(`The model did not return valid JSON (${detail}).`);
+  }
+
+  return schema.parse(parsed);
+}
+
+// Defensively isolate the JSON object from the model output: strip markdown
+// code fences and any prose before/after the outermost { ... }.
+function extractJson(text: string): string {
+  let t = text.trim();
+
+  const fence = t.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  if (fence) {
+    t = fence[1].trim();
+  }
+
+  const first = t.indexOf("{");
+  const last = t.lastIndexOf("}");
+  if (first !== -1 && last > first) {
+    t = t.slice(first, last + 1);
+  }
+
+  return t;
 }

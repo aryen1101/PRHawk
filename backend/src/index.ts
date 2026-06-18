@@ -83,9 +83,18 @@ function startServer(): void {
 
       const conventions = await loadConventions();
       const result = await reviewDiff(pr.title ?? "", pr.body ?? "", contexts, conventions, customLlmKey, customLlmBase);
-      await postReview(ref, pr.head.sha, result, customToken);
 
-      res.json({ ...result, conventionsUsed: conventions.length, prUrl: url.trim() });
+      // Posting to GitHub requires a token with PR-write access. If it fails
+      // (e.g. read-only/insufficient token), still return the generated review
+      // so the user sees it in the UI, with a warning explaining the post failed.
+      let postWarning: string | undefined;
+      try {
+        await postReview(ref, pr.head.sha, result, customToken);
+      } catch (postErr) {
+        postWarning = postErr instanceof Error ? postErr.message : String(postErr);
+      }
+
+      res.json({ ...result, conventionsUsed: conventions.length, prUrl: url.trim(), postWarning });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }

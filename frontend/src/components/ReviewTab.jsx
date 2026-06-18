@@ -47,7 +47,11 @@ export default function ReviewTab({ accessKey, addToast }) {
     try {
       const data = await runReview(url.trim(), accessKey);
       setResult(data);
-      addToast("Code review completed successfully!", "success");
+      if (data.postWarning) {
+        addToast(`Review generated, but not posted to GitHub: ${data.postWarning}`, "error");
+      } else {
+        addToast("Code review completed successfully!", "success");
+      }
     } catch (err) {
       console.error(err);
       addToast(err.message, "error");

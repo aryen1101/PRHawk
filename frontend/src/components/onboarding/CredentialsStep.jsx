@@ -62,7 +62,7 @@ export default function CredentialsStep({
               value={customGithubToken}
               onChange={(e) => setCustomGithubToken(e.target.value)}
             />
-            <span className="form-help">Requires read-only repository permissions.</span>
+            <span className="form-help">Needs permission to post PR reviews: classic token with the <code>repo</code> scope (or <code>public_repo</code> for public repos), and the account must have access to the reviewed repository.</span>
           </div>
 
           <div className="form-group" style={{ textAlign: "left" }}>

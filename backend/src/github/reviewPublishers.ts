@@ -35,15 +35,33 @@ export async function postReview(
     body: formatCommentBody(c),
   }));
 
-  await client.pulls.createReview({
-    owner: ref.owner,
-    repo: ref.repo,
-    pull_number: ref.pullNumber,
-    commit_id: headSha,
-    body: formatSummaryBody(result.summary),
-    event: "COMMENT",
-    comments,
-  });
+  try {
+    await client.pulls.createReview({
+      owner: ref.owner,
+      repo: ref.repo,
+      pull_number: ref.pullNumber,
+      commit_id: headSha,
+      body: formatSummaryBody(result.summary),
+      event: "COMMENT",
+      comments,
+    });
+  } catch (err) {
+    const status = (err as { status?: number })?.status;
+    const repo = `${ref.owner}/${ref.repo}`;
+    if (status === 403 || status === 404) {
+      throw new Error(
+        `GitHub rejected the review (HTTP ${status}). The GitHub token must have permission to post pull request reviews on ${repo} — ` +
+          `use a classic token with the 'repo' scope (or 'public_repo' for public repos), and make sure that account has access to the repository.`,
+      );
+    }
+    if (status === 422) {
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `GitHub could not post the inline review comments (HTTP 422). This usually means a suggested comment line falls outside the PR diff. ${detail}`,
+      );
+    }
+    throw err;
+  }
 }
 
 function formatCommentBody(c: InlineComment): string {
