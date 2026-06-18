@@ -20,9 +20,37 @@ function parseRepo(target: string): { owner: string; repo: string } | null {
   return { owner: m[1], repo: m[2].replace(/\.git$/, "") };
 }
 
+const allowedOrigins = (
+ 
+  "https://pr-hawk.vercel.app,http://localhost:3000"
+)
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
 function startServer(): void {
   const app = express();
-  app.use(express.json()); 
+
+
+  app.use((req, res, next) => {
+    const origin = req.header("origin");
+    if (origin && allowedOrigins.includes(origin)) {
+      res.header("Access-Control-Allow-Origin", origin);
+      res.header("Vary", "Origin");
+      res.header("Access-Control-Allow-Methods", "GET,POST,PUT,OPTIONS");
+      res.header(
+        "Access-Control-Allow-Headers",
+        "Content-Type,x-access-key,x-github-token,x-openrouter-key"
+      );
+    }
+    if (req.method === "OPTIONS") {
+      res.sendStatus(204);
+      return;
+    }
+    next();
+  });
+
+  app.use(express.json());
 
   const dir = path.dirname(fileURLToPath(import.meta.url));
   app.use(express.static(path.join(dir, "..", "..", "frontend", "dist")));

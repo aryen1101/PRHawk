@@ -1,5 +1,15 @@
 import { STORAGE_KEYS } from "./storageKeys";
 
+// Base URL for the backend API. Empty by default so local dev keeps using the
+// Vite proxy (relative "/api/..."); set VITE_API_BASE_URL (e.g. in
+// .env.production) to target a deployed backend like Render.
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+
+// Prefixes an "/api/..." path with the configured backend base URL.
+function apiUrl(path) {
+  return `${API_BASE}${path}`;
+}
+
 // Builds the request headers shared by the data endpoints. Personal GitHub /
 // OpenRouter keys are read from localStorage and only attached when present —
 // this mirrors the original per-component logic exactly.
@@ -24,18 +34,18 @@ async function parseJsonOrThrow(response, fallbackError) {
 
 // Whether this instance requires an access key. -> { authRequired: boolean }
 export async function fetchAuthRequired() {
-  const res = await fetch("/api/auth-required");
+  const res = await fetch(apiUrl("/api/auth-required"));
   return res.json();
 }
 
 // Probes the conventions endpoint with just the access key so the caller can
 // inspect response.status (401 => invalid key). Returns the raw Response.
 export function verifyAccessKey(key) {
-  return fetch("/api/conventions", { headers: { "x-access-key": key } });
+  return fetch(apiUrl("/api/conventions"), { headers: { "x-access-key": key } });
 }
 
 export async function runReview(url, accessKey) {
-  const response = await fetch("/api/review", {
+  const response = await fetch(apiUrl("/api/review"), {
     method: "POST",
     headers: credentialHeaders(accessKey, { json: true }),
     body: JSON.stringify({ url }),
@@ -44,14 +54,14 @@ export async function runReview(url, accessKey) {
 }
 
 export async function getConventions(accessKey) {
-  const response = await fetch("/api/conventions", {
+  const response = await fetch(apiUrl("/api/conventions"), {
     headers: credentialHeaders(accessKey),
   });
   return parseJsonOrThrow(response, "Failed to load rules");
 }
 
 export async function learnConventions(repo, accessKey) {
-  const response = await fetch("/api/learn", {
+  const response = await fetch(apiUrl("/api/learn"), {
     method: "POST",
     headers: credentialHeaders(accessKey, { json: true }),
     body: JSON.stringify({ repo }),
@@ -60,7 +70,7 @@ export async function learnConventions(repo, accessKey) {
 }
 
 export async function saveConventions(rules, accessKey) {
-  const response = await fetch("/api/conventions", {
+  const response = await fetch(apiUrl("/api/conventions"), {
     method: "PUT",
     headers: credentialHeaders(accessKey, { json: true }),
     body: JSON.stringify({ rules }),
