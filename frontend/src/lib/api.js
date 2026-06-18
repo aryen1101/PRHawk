@@ -48,6 +48,7 @@ export async function runReview(url, accessKey) {
   const response = await fetch(apiUrl("/api/review"), {
     method: "POST",
     headers: credentialHeaders(accessKey, { json: true }),
+    credentials: "include", // send the better-auth session cookie
     body: JSON.stringify({ url }),
   });
   return parseJsonOrThrow(response, "Failed to run review");
@@ -56,6 +57,7 @@ export async function runReview(url, accessKey) {
 export async function getConventions(accessKey) {
   const response = await fetch(apiUrl("/api/conventions"), {
     headers: credentialHeaders(accessKey),
+    credentials: "include",
   });
   return parseJsonOrThrow(response, "Failed to load rules");
 }
@@ -64,6 +66,7 @@ export async function learnConventions(repo, accessKey) {
   const response = await fetch(apiUrl("/api/learn"), {
     method: "POST",
     headers: credentialHeaders(accessKey, { json: true }),
+    credentials: "include",
     body: JSON.stringify({ repo }),
   });
   return parseJsonOrThrow(response, "Failed to learn conventions");
@@ -73,6 +76,7 @@ export async function saveConventions(rules, accessKey) {
   const response = await fetch(apiUrl("/api/conventions"), {
     method: "PUT",
     headers: credentialHeaders(accessKey, { json: true }),
+    credentials: "include",
     body: JSON.stringify({ rules }),
   });
   return parseJsonOrThrow(response, "Failed to save conventions");

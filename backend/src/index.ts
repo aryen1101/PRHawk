@@ -11,8 +11,19 @@ import { reviewDiff } from "./review/reviewer.js";
 import { loadConventions, saveCoventions } from "./conventions/store.js";
 import { learnConventions } from "./conventions/learner.js";
 import { config } from "./config.js";
-import { toNodeHandler } from "better-auth/node";
+import { toNodeHandler, fromNodeHeaders } from "better-auth/node";
 import { auth } from "./lib/auth.js";
+import type { Request } from "express";
+
+// Resolves the signed-in user's id from the better-auth session cookie.
+// Returns null when there is no valid session.
+async function getUserId(req: Request): Promise<string | null> {
+  const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
+  return session?.user?.id ?? null;
+}
+
+// Conventions bucket used by the CLI, which has no logged-in user/session.
+const CLI_USER_ID = "cli";
 
 function parseRepo(target: string): { owner: string; repo: string } | null {
   const m =
@@ -65,6 +76,12 @@ function startServer(): void {
 
   app.post("/api/review", async (req, res) => {
     try {
+      const userId = await getUserId(req);
+      if (!userId) {
+        res.status(401).json({ error: "Please sign in to run a review." });
+        return;
+      }
+
       const url: string = req.body?.url ?? "";
       if (!url.trim()) {
         res.status(400).json({ error: "Please paste a GitHub pull request URL." });
@@ -83,7 +100,7 @@ function startServer(): void {
         return;
       }
 
-      const conventions = await loadConventions();
+      const conventions = await loadConventions(userId);
       const result = await reviewDiff(pr.title ?? "", pr.body ?? "", contexts, conventions, customLlmKey, customLlmBase);
 
       let postWarning: string | undefined;
@@ -101,6 +118,12 @@ function startServer(): void {
 
   app.post("/api/learn", async (req, res) => {
     try {
+      const userId = await getUserId(req);
+      if (!userId) {
+        res.status(401).json({ error: "Please sign in to learn conventions." });
+        return;
+      }
+
       const target: string = req.body?.repo ?? "";
       const parsed = parseRepo(target);
       if (!parsed) {
@@ -112,16 +135,21 @@ function startServer(): void {
       const customLlmKey = req.header("x-openrouter-key") || undefined;
       const customLlmBase = customLlmKey ? "https://openrouter.ai/api/v1" : undefined;
 
-      const rules = await learnConventions(parsed.owner, parsed.repo, customToken, customLlmKey, customLlmBase);
+      const rules = await learnConventions(userId, parsed.owner, parsed.repo, customToken, customLlmKey, customLlmBase);
       res.json({ rules });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
   });
 
-  app.get("/api/conventions", async (_req, res) => {
+  app.get("/api/conventions", async (req, res) => {
     try {
-      const rules = await loadConventions();
+      const userId = await getUserId(req);
+      if (!userId) {
+        res.status(401).json({ error: "Please sign in to view your rules." });
+        return;
+      }
+      const rules = await loadConventions(userId);
       res.json({ rules });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
@@ -130,12 +158,17 @@ function startServer(): void {
 
   app.put("/api/conventions", async (req, res) => {
     try {
+      const userId = await getUserId(req);
+      if (!userId) {
+        res.status(401).json({ error: "Please sign in to save your rules." });
+        return;
+      }
       const rules = req.body?.rules;
       if (!Array.isArray(rules)) {
         res.status(400).json({ error: "Provide rules as an array." });
         return;
       }
-      await saveCoventions(rules);
+      await saveCoventions(userId, rules);
       res.json({ success: true, rules });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
@@ -159,7 +192,7 @@ async function runReview(url: string): Promise<void> {
     return;
   }
 
-  const conventions = await loadConventions();
+  const conventions = await loadConventions(CLI_USER_ID);
   console.log(
     `Reviewing ${contexts.length} file(s) with ${conventions.length} learned convention(s)...`,
   );
@@ -181,7 +214,7 @@ async function runLearn(target: string): Promise<void> {
   }
 
   console.log(`Learning conventions from ${parsed.owner}/${parsed.repo}...`);
-  const rules = await learnConventions(parsed.owner, parsed.repo);
+  const rules = await learnConventions(CLI_USER_ID, parsed.owner, parsed.repo);
   console.log(`Learned and saved ${rules.length} convention(s).`);
   for (const r of rules) {
     console.log(`  - [${r.severity}] ${r.rule}`);

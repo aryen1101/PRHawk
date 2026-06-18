@@ -1,23 +1,27 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
-import { config } from "../config.js";
 import type { ConventionRule } from "../types.js";
+import { client } from "../db/index.js";
 
-export async function loadConventions(): Promise<ConventionRule[]> {
-  try {
-    const raw = await fs.readFile(config.conventionsPath, "utf-8");
-    const parsed = JSON.parse(raw) as { rules?: ConventionRule[] };
-    return parsed.rules ?? [];
-  } catch {
-    return [];
-  }
+interface ConventionsDoc {
+  userId: string;
+  rules: ConventionRule[];
 }
 
-export async function saveCoventions(rules: ConventionRule[]): Promise<void> {
-  await fs.mkdir(path.dirname(config.conventionsPath), { recursive: true });
-  await fs.writeFile(
-    config.conventionsPath,
-    JSON.stringify({ rules }, null, 2),
-    "utf-8",
+function conventionsCollection() {
+  return client.db("pr_hawk").collection<ConventionsDoc>("conventions");
+}
+
+export async function loadConventions(userId: string): Promise<ConventionRule[]> {
+  const doc = await conventionsCollection().findOne({ userId });
+  return doc?.rules ?? [];
+}
+
+export async function saveCoventions(
+  userId: string,
+  rules: ConventionRule[],
+): Promise<void> {
+  await conventionsCollection().updateOne(
+    { userId },
+    { $set: { userId, rules } },
+    { upsert: true },
   );
 }

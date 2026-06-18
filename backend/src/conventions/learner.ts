@@ -12,6 +12,7 @@ import {
 const MAX_SAMPLE_CHARS = 5000;
 
 export async function learnConventions(
+  userId: string,
   owner: string,
   repo: string,
   customToken?: string,
@@ -59,6 +60,6 @@ export async function learnConventions(
   );
 
   const rules = result.rules ?? [];
-  await saveCoventions(rules);
+  await saveCoventions(userId, rules);
   return rules;
 }
