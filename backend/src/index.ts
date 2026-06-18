@@ -11,6 +11,8 @@ import { reviewDiff } from "./review/reviewer.js";
 import { loadConventions, saveCoventions } from "./conventions/store.js";
 import { learnConventions } from "./conventions/learner.js";
 import { config } from "./config.js";
+import { toNodeHandler } from "better-auth/node";
+import { auth } from "./lib/auth.js";
 
 function parseRepo(target: string): { owner: string; repo: string } | null {
   const m =
@@ -30,6 +32,8 @@ const allowedOrigins = (
 
 function startServer(): void {
   const app = express();
+
+  app.all("/api/auth/*", toNodeHandler(auth));
 
 
   app.use((req, res, next) => {
