@@ -48,6 +48,11 @@ export async function postReview(
   } catch (err) {
     const status = (err as { status?: number })?.status;
     const repo = `${ref.owner}/${ref.repo}`;
+    if (status === 401) {
+      throw new Error(
+        "GitHub rejected the installation token (HTTP 401). Reinstall the GitHub App and verify its repository permissions.",
+      );
+    }
     if (status === 403 || status === 404) {
       throw new Error(
         `GitHub rejected the review (HTTP ${status}). The GitHub token must have permission to post pull request reviews on ${repo} — ` +

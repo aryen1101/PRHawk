@@ -1,225 +1,215 @@
-# 🦅 PRHawk
+# PRHawk
 
-**AI-powered GitHub Pull Request reviewer.** Sign in, paste a PR URL, and get inline code comments, a quality score, and a merge recommendation — posted directly back to GitHub.
+AI code review for GitHub pull requests, delivered where the work happens.
 
-PRHawk also *learns* your team's coding conventions from merged PR history and applies them as additional review rules on every future review.
+PRHawk is a GitHub App that listens for pull request events, reviews changed lines with an OpenAI-compatible model, falls back to Groq when needed, and posts an inline review back to GitHub.
 
-🔗 **Live:** frontend on Vercel ([pr-hawk.vercel.app](https://pr-hawk.vercel.app)) · backend API on Render.
+## How it works
 
----
-
-## ✨ Features
-
-- **Account-based access** — email/password sign-up & login (powered by [better-auth](https://better-auth.com), sessions stored in MongoDB). The dashboard is gated behind authentication.
-- **Automated inline comments** — bugs, security issues, performance regressions, style violations, and suggestions, pinned to the exact line.
-- **Risk summary** — overall quality score (0–100), highest-risk changes, and an `approve / request_changes / comment` merge decision.
-- **Convention learning** — analyses your repo's last 10 merged PRs and extracts team-specific rules that are applied on all future reviews.
-- **Bring your own keys** — users can supply their own GitHub token and OpenRouter key in the UI (Settings), so reviews run under their own identity and quota instead of the server's.
-- **Graceful posting** — if the GitHub token can't post the review (e.g. insufficient scope), the analysis is still returned to the UI with a clear warning instead of failing.
-- **CLI mode** — run reviews and convention learning from the terminal without the web server or auth.
-
----
-
-## 🧱 Tech Stack
-
-| Layer | Stack |
-|---|---|
-| **Frontend** | React 19, Vite, React Router v7, better-auth React client, lucide-react |
-| **Backend** | Node + Express 5, TypeScript (run directly via `tsx`), Octokit, OpenAI SDK (Groq / OpenRouter), Zod |
-| **Auth & data** | better-auth (email/password) + MongoDB |
-| **Hosting** | Vercel (frontend) · Render (backend) · MongoDB Atlas |
-
----
-
-## 🗂️ Project Structure
-
+```text
+Pull request opened or updated
+        ↓
+GitHub App webhook
+        ↓
+Signature verification
+        ↓
+Installation access token
+        ↓
+Changed files + repository conventions
+        ↓
+OpenAI Astra
+        ↓ on failure
+Groq fallback
+        ↓
+Summary and inline GitHub comments
 ```
+
+There is no email/password account system and no manual PR URL form. Users install the GitHub App once, select repositories, and reviews happen automatically.
+
+The CLI remains available for maintainers who want local dry runs or administrative workflows. Normal convention learning happens automatically after merged pull requests.
+
+## Features
+
+- Automatic reviews through GitHub App webhooks
+- Inline comments on valid changed lines
+- Quality score and merge recommendation
+- Automatic convention learning after merged pull requests
+- OpenAI-first with Groq fallback
+- Public install landing page
+- CLI for dry runs and local workflows
+- MongoDB persistence for installation/repository conventions
+- No personal GitHub tokens required for normal App users
+
+## Project structure
+
+```text
 PRHawk/
-├── backend/          # Express REST API + CLI (TypeScript)
-│   ├── src/
-│   │   ├── index.ts           # Entry point: server or CLI; CORS + routes
-│   │   ├── config.ts          # Environment-variable configuration
-│   │   ├── types.ts           # Shared TypeScript types
-│   │   ├── lib/
-│   │   │   └── auth.ts        # better-auth instance (email/password, cookies)
-│   │   ├── db/
-│   │   │   └── index.ts       # MongoClient (used by better-auth)
-│   │   ├── github/            # GitHub API integration (Octokit)
-│   │   │   ├── client.ts      # Octokit client factory (central or custom token)
-│   │   │   ├── diffParser.ts  # Parses unified diffs → added line numbers
-│   │   │   ├── prService.ts   # Fetches PR metadata & file contents
-│   │   │   └── reviewPublishers.ts  # Posts reviews & comments to GitHub
-│   │   ├── llm/
-│   │   │   └── groq.ts        # OpenAI-compatible client (Groq / OpenRouter)
-│   │   ├── review/
-│   │   │   ├── prompts.ts     # System & user prompt builders
-│   │   │   ├── schema.ts      # Zod schemas for structured LLM output
-│   │   │   └── reviewer.ts    # Orchestrates the review pipeline
-│   │   └── conventions/
-│   │       ├── learner.ts     # Extracts team conventions from merged PRs
-│   │       └── store.ts       # Reads/writes conventions/rules.json
-│   └── .env.example           # ← copy to backend/.env and fill in
-└── frontend/         # React + Vite web UI
-    └── src/
-        ├── main.jsx           # Mounts <App/> inside <BrowserRouter>
-        ├── App.jsx            # Routes: /login, /signup, protected dashboard
-        ├── lib/
-        │   ├── api.js         # Wrappers around the backend REST API
-        │   ├── auth.js        # better-auth React client (authClient)
-        │   └── storageKeys.js # localStorage keys + per-session cleanup
-        ├── hooks/
-        │   └── usePersistentState.js  # localStorage-backed React state
-        ├── pages/
-        │   ├── LoginPage.jsx
-        │   └── SignupPage.jsx
-        └── components/
-            ├── AuthGuard.jsx  # Redirects to /login when no session
-            ├── Header.jsx · ToastContainer.jsx
-            ├── ReviewTab.jsx  + review/   # input, loader, summary, findings
-            ├── RulesTab.jsx   + rules/    # toolbar, add/edit, learn panel
-            └── OnboardingOverlay.jsx + onboarding/  # settings / custom keys
+├── backend/
+│   └── src/
+│       ├── index.ts                 # Express server + webhook endpoint
+│       ├── cli.ts                   # Local review and learning CLI
+│       ├── github/
+│       │   ├── appAuth.ts           # GitHub App JWT/install token flow
+│       │   ├── prService.ts         # Pull request and diff loading
+│       │   └── reviewPublishers.ts  # Posts GitHub reviews
+│       ├── review/                  # Prompts, schemas, and review engine
+│       ├── conventions/             # MongoDB-backed learned conventions
+│       └── llm/                     # OpenAI/Groq-compatible completion flow
+├── frontend/
+│   └── src/
+│       ├── pages/LandingPage.jsx    # Public install page
+│       └── App.jsx
+└── test.md                          # Complete webhook test guide
 ```
 
----
+## Local setup
 
-## ⚙️ Environment Setup
+Requirements:
 
-### Backend — `backend/.env`
+- Node.js 22+
+- MongoDB or MongoDB Atlas
+- GitHub App credentials
+- OpenAI and/or Groq API key
 
-```bash
-cp backend/.env.example backend/.env
-```
+Install dependencies:
 
-| Variable | Required | Description |
-|---|---|---|
-| `OPENROUTER_API_KEY` | One of these two | API key for [OpenRouter](https://openrouter.ai). When set, OpenRouter is the LLM provider. |
-| `GROQ_API_KEY` | One of these two | API key for [Groq](https://console.groq.com). Used when `OPENROUTER_API_KEY` is not set. |
-| `GITHUB_TOKEN` | ✅ Yes | GitHub PAT used to fetch PRs and post reviews. Classic token with `repo` (private) or `public_repo` (public). |
-| `MONGODB_URL` | ✅ Yes | MongoDB connection string for better-auth (users/sessions). The server **fails to start** if unset. e.g. `mongodb+srv://…` |
-| `BETTER_AUTH_SECRET` | ✅ Yes | Secret used to sign sessions. Generate with `openssl rand -base64 32`. |
-| `BETTER_AUTH_URL` | ✅ Yes | Public base URL of **this backend** (e.g. `http://localhost:3000` locally, the Render URL in prod). |
-| `MODEL` | No | Override the LLM model. Defaults to `google/gemini-2.5-flash` (OpenRouter) or `llama-3.3-70b-versatile` (Groq). |
-| `PORT` | No | Port the Express server listens on. Defaults to `3000`. (Render injects this — don't hardcode it there.) |
-| `APP_SECRET` | No | Legacy `x-access-key` gate, predates better-auth. Leave empty. |
-
-### Frontend — `frontend/.env`
-
-```bash
-cp frontend/.env.example frontend/.env   # optional for local dev
-```
-
-| Variable | Description |
-|---|---|
-| `VITE_API_BASE_URL` | Base URL of the backend API. **Leave empty for local dev** (requests stay relative and use the Vite proxy → `localhost:3000`). Set to the backend's public URL for production builds. |
-
----
-
-## 🚀 Running Locally
-
-You'll need a MongoDB instance (local or [Atlas](https://www.mongodb.com/atlas) free tier) for auth.
-
-### Backend
-
-```bash
+```powershell
 cd backend
 npm install
-npm start          # Express server at http://localhost:3000
+
+cd ../frontend
+npm install
 ```
 
-### Frontend (development)
+Create `backend/.env.local` from `backend/.env.example` and configure:
 
-```bash
+```env
+MONGODB_URL=mongodb+srv://user:password@cluster.mongodb.net/
+
+GITHUB_APP_ID=your_app_id
+GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
+GITHUB_WEBHOOK_SECRET=your_webhook_secret
+
+OPENAI_API_KEY=your_openai_key
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL=gpt-6-astra
+
+GROQ_API_KEY=your_groq_key
+GROQ_MODEL=openai/gpt-oss-120b
+```
+
+OpenAI is attempted first. If the request fails or returns unusable output, the same review is retried through Groq.
+
+## GitHub App setup
+
+Create a GitHub App under **Settings → Developer settings → GitHub Apps**.
+
+Set these repository permissions:
+
+- Contents: Read-only
+- Pull requests: Read and write
+- Metadata: Read-only
+
+Enable the **Pull request** webhook event and configure the production webhook URL:
+
+```text
+https://prhawk-1.onrender.com/api/github/webhook
+```
+
+Install the App on the repositories that should receive automatic reviews.
+
+Set the GitHub App **Setup URL** to the deployed setup route:
+
+```text
+https://prhawk-1.onrender.com/setup
+```
+
+After installation, GitHub redirects the user to this page. The user selects the repository to review and may optionally enter another repository as a convention source. PRHawk verifies that the App is installed on every selected repository before saving the configuration.
+
+For local testing, expose port `3000` with an HTTPS tunnel such as ngrok, then use:
+
+```text
+https://YOUR_TUNNEL_HOST/api/github/webhook
+```
+
+The complete setup and test sequence is in [test.md](test.md).
+
+## Run locally
+
+Start the backend:
+
+```powershell
+cd backend
+npm.cmd start
+```
+
+The webhook server runs at `http://localhost:3000`.
+
+Start the public frontend in a second terminal:
+
+```powershell
 cd frontend
-npm install
-npm run dev        # Vite dev server, proxies /api/* to :3000
+npm.cmd run dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173), create an account, and you're in.
+Open `http://localhost:5173`. Set `VITE_GITHUB_APP_INSTALL_URL` in `frontend/.env.local` or the deployment environment to the App installation URL:
 
-### Production build
-
-```bash
-cd frontend && npm run build   # Outputs to frontend/dist/
-cd ../backend && npm start     # Also serves frontend/dist as static files
+```env
+VITE_GITHUB_APP_INSTALL_URL=https://github.com/apps/YOUR_APP_SLUG/installations/new
 ```
 
-A single backend process can serve both the API and the built frontend when they're co-located.
+## CLI
 
----
+The CLI does not require the web server or a browser.
 
-## ☁️ Deployment (Vercel + Render)
+Review a pull request and post the result:
 
-PRHawk is deployed as **two services on different domains**, so a few things are wired specifically for that:
-
-**Backend (Render)**
-- Root Directory: `backend` · Build: `npm install` · Start: `npm start` (no compile step — `tsx` runs TypeScript directly).
-- Env vars: all the backend vars above, including `MONGODB_URL`, `BETTER_AUTH_SECRET`, and `BETTER_AUTH_URL` (= the Render URL). Don't set `PORT`.
-- In MongoDB Atlas, allow Render's network access (`0.0.0.0/0` or Render's IPs).
-
-**Frontend (Vercel)**
-- Root Directory: `frontend` · Build: `npm run build` · Output: `dist`.
-- Set `VITE_API_BASE_URL` to the Render backend URL (or commit it in `frontend/.env.production`).
-
-**Cross-domain auth** — because the two run on different domains:
-- The backend's CORS allows the frontend origin and sends `Access-Control-Allow-Credentials: true` (allowed origins are listed in `backend/src/index.ts`; trusted origins in `backend/src/lib/auth.ts`).
-- Session cookies are issued with `SameSite=None; Secure` so the browser sends them cross-site. Browsers that block third-party cookies may still reject them — the most robust alternative is to put both behind one domain (a Vercel rewrite of `/api/*`, or sub-domains with `crossSubDomainCookies`).
-
----
-
-## 🖥️ CLI Usage
-
-Reviews and convention learning can run from the terminal without the web server or authentication.
-
-```bash
+```powershell
 cd backend
-
-# Review a pull request
-npm run review https://github.com/owner/repo/pull/123
-
-# Learn conventions from a repository's merged PR history
-npm run learn owner/repo
-# or
-npm run learn https://github.com/owner/repo
+npm.cmd run review -- https://github.com/owner/repository/pull/123
 ```
 
----
+Analyze without posting:
 
-## 🔄 How It Works
+```powershell
+npm.cmd run review -- https://github.com/owner/repository/pull/123 --dry-run
+```
 
-### Authentication
+Learn conventions from merged pull requests:
 
-- The React app renders `/login` and `/signup`; every other route is wrapped in `AuthGuard`, which checks the better-auth session and redirects to `/login` when there isn't one.
-- Sign-up/sign-in call the backend's `/api/auth/*` routes (handled by better-auth), which store users and sessions in MongoDB and set a session cookie.
-- Per-user dashboard state (last review, active tab) lives in `localStorage` and is cleared on login/logout so it never leaks between accounts on a shared browser.
+```powershell
+npm.cmd run learn -- owner/repository
+```
 
-### PR Review
+Learned conventions are stored in MongoDB and are scoped to the GitHub installation/repository that uses them. The CLI remains available for local or administrative learning workflows.
 
-1. You paste a GitHub PR URL into the UI (or pass it to the CLI).
-2. The backend fetches the PR metadata and changed files via the GitHub API.
-3. Each file's unified diff is parsed to identify the exact added/modified line numbers.
-4. The full file content at the PR's head commit is fetched for context.
-5. Saved team conventions are loaded from `conventions/rules.json`.
-6. A structured prompt (diff, numbered file content, addable lines, conventions) is sent to the LLM.
-7. The LLM returns JSON (validated against a Zod schema) with inline comments and a risk summary.
-8. Comments referencing lines outside the "addable" set are discarded to prevent ghost comments.
-9. The review is posted to the PR as inline comments + a summary. If posting fails (token permissions), the analysis is still returned to the UI with a `postWarning`.
+## API endpoints
 
-### Convention Learning
+```text
+POST /api/github/webhook  GitHub App webhook receiver
+GET  /api/github/setup    List repositories available to an App installation
+POST /api/github/setup    Save target and optional convention-source repositories
+GET  /api/health          Service health check
+```
 
-1. You provide a repository (`owner/repo`) in the UI or CLI.
-2. The backend fetches recent closed PRs and keeps the 10 most recently merged.
-3. Their diff patches are sent to the LLM.
-4. The LLM extracts recurring patterns — naming, error handling, testing expectations, etc. — as concrete rules with severity tags.
-5. Rules are saved to `backend/conventions/rules.json` and applied to all future reviews.
+The webhook returns `202 Accepted` after a valid event is accepted and runs review or convention learning in the background. Pull requests opened, reopened, or updated are reviewed; merged pull requests trigger convention learning.
 
----
+## Verification
 
-## 🔑 GitHub Token Notes
+```powershell
+cd frontend
+npm.cmd run lint
+npm.cmd run build
 
-| Use case | Token |
-|---|---|
-| Review **public** repos | Classic token with `public_repo` scope |
-| Review **private** repos | Classic token with `repo` scope (and access to the repo) |
-| Review **another account's** repo | That account's token; for private repos you must be a collaborator |
+cd ../backend
+npx.cmd tsc --noEmit
+```
 
-> ⚠️ **Fine-grained tokens** are bound to a single resource owner and can only *write* to repos that owner controls — they **cannot post reviews to a repo owned by a different account**, even a public one. Use a **classic** token with `public_repo`/`repo` for cross-account reviews. Reviews are posted with `event: "COMMENT"`, so reviewing your own PR works (GitHub only blocks self-*approval*).
+## Security
+
+- Keep `backend/.env.local` out of Git.
+- Never commit a GitHub App private key or webhook secret.
+- Store AI keys and MongoDB credentials only in deployment secrets.
+- Verify every webhook using `X-Hub-Signature-256`.
+- Give the GitHub App only the minimum repository permissions required.
+- Rotate any credential that is exposed.

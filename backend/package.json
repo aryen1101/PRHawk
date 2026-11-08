@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "start": "tsx src/index.ts",
-    "review": "tsx src/index.ts review",
-    "learn": "tsx src/index.ts learn"
+    "review": "tsx src/cli.ts review",
+    "learn": "tsx src/cli.ts learn",
+    "cli": "tsx src/cli.ts"
   },
   "keywords": [],
   "author": "",
@@ -14,7 +15,6 @@
   "description": "",
   "dependencies": {
     "@octokit/rest": "^22.0.1",
-    "better-auth": "^1.6.19",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "mongodb": "^7.3.0",

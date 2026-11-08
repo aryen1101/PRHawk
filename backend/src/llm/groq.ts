@@ -2,23 +2,45 @@ import OpenAI from "openai";
 import { z } from "zod";
 import { config } from "../config.js";
 
-let client: OpenAI | null = null;
+type Provider = { name: string; model: string; client: OpenAI };
 
-function getOpenAIClient(customKey?: string, customBaseURL?: string): OpenAI {
+function getProviders(customKey?: string, customBaseURL?: string): Provider[] {
   if (customKey) {
-    return new OpenAI({
-      apiKey: customKey,
-      baseURL: customBaseURL || "https://openrouter.ai/api/v1",
-    });
-  }
-  if (!client) {
-    client = new OpenAI({
-      apiKey: config.apiKey(),
-      baseURL: config.baseURL(),
-    });
+    return [{
+      name: "OpenRouter custom key",
+      model: config.openrouterModel,
+      client: new OpenAI({
+        apiKey: customKey,
+        baseURL: customBaseURL || "https://openrouter.ai/api/v1",
+      }),
+    }];
   }
 
-  return client;
+  const providers: Provider[] = [];
+  if (config.openaiApiKey()) {
+    providers.push({
+      name: "OpenAI",
+      model: config.openaiModel,
+      client: new OpenAI({
+        apiKey: config.openaiApiKey(),
+        baseURL: config.openaiBaseURL,
+      }),
+    });
+  }
+  if (config.groqApiKey()) {
+    providers.push({
+      name: "Groq",
+      model: config.groqModel,
+      client: new OpenAI({
+        apiKey: config.groqApiKey(),
+        baseURL: "https://api.groq.com/openai/v1",
+      }),
+    });
+  }
+  if (providers.length === 0) {
+    throw new Error("Configure OPENAI_API_KEY or GROQ_API_KEY before running a review.");
+  }
+  return providers;
 }
 
 export async function complete<T extends z.ZodTypeAny>(
@@ -29,63 +51,55 @@ export async function complete<T extends z.ZodTypeAny>(
   customBaseURL?: string,
 ): Promise<z.infer<T>> {
   const shape = JSON.stringify(z.toJSONSchema(schema));
-  const client = getOpenAIClient(customKey, customBaseURL);
+  const errors: string[] = [];
 
-  // LLMs occasionally emit malformed JSON or output that doesn't match the
-  // schema. That's non-deterministic, so a fresh sample almost always fixes it
-  // — retry a few times before giving up.
-  const MAX_ATTEMPTS = 3;
-  let lastDetail = "";
+  for (const provider of getProviders(customKey, customBaseURL)) {
+    let lastDetail = "";
 
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const response = await client.chat.completions.create({
-      model: config.model,
-      temperature: 0.2,
-      max_tokens: 8000,
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content:
-            `${system}\n\nReply with one JSON object matching this JSON Schema. ` +
-            `Do not add markdown fences or any text around it:\n${shape}`,
-        },
-        { role: "user", content: user },
-      ],
-    });
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const response = await provider.client.chat.completions.create({
+          model: provider.model,
+          max_completion_tokens: 8000,
+          response_format: { type: "json_object" },
+          messages: [
+            {
+              role: "system",
+              content:
+                `${system}\n\nReply with one JSON object matching this JSON Schema. ` +
+                `Do not add markdown fences or any text around it:\n${shape}`,
+            },
+            { role: "user", content: user },
+          ],
+        });
 
-    const choice = response.choices[0];
-    const text = choice?.message?.content;
+        const choice = response.choices[0];
+        const text = choice?.message?.content;
 
-    // Truncation (hit the output token limit) won't be fixed by retrying with
-    // the same prompt, so fail fast with an actionable message.
-    if (choice?.finish_reason === "length") {
-      throw new Error(
-        "The model's response was cut off before it finished (output token limit reached). " +
-          "Try reviewing a smaller pull request.",
-      );
+        if (choice?.finish_reason === "length") {
+          throw new Error("response was cut off at the output token limit");
+        }
+        if (!text) {
+          lastDetail = "empty response";
+          continue;
+        }
+
+        try {
+          return schema.parse(JSON.parse(extractJson(text)));
+        } catch (err) {
+          lastDetail = err instanceof Error ? err.message : String(err);
+        }
+      } catch (err) {
+        lastDetail = err instanceof Error ? err.message : String(err);
+      }
     }
 
-    if (!text) {
-      lastDetail = "empty response";
-      continue;
-    }
-
-    try {
-      return schema.parse(JSON.parse(extractJson(text)));
-    } catch (err) {
-      lastDetail = err instanceof Error ? err.message : String(err);
-      // fall through to the next attempt
-    }
+    errors.push(`${provider.name}: ${lastDetail}`);
   }
 
-  throw new Error(
-    `The model did not return valid JSON after ${MAX_ATTEMPTS} attempts (${lastDetail}). Please try again.`,
-  );
+  throw new Error(`All configured AI providers failed. ${errors.join(" | ")}`);
 }
 
-// Defensively isolate the JSON object from the model output: strip markdown
-// code fences and any prose before/after the outermost { ... }.
 function extractJson(text: string): string {
   let t = text.trim();
 
