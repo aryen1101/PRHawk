@@ -121,7 +121,7 @@ Install the App on the repositories that should receive automatic reviews.
 Set the GitHub App **Setup URL** to the deployed setup route:
 
 ```text
-https://prhawk-1.onrender.com/setup
+https://pr-hawk.vercel.app/setup
 ```
 
 After installation, GitHub redirects the user to this page. The user selects the repository to review and may optionally enter another repository as a convention source. PRHawk verifies that the App is installed on every selected repository before saving the configuration.

@@ -7,7 +7,7 @@ services:
     healthCheckPath: /api/health
     envVars:
       - key: FRONTEND_ORIGIN
-        value: https://prhawk-1.onrender.com
+        value: https://pr-hawk.vercel.app
       - key: OPENAI_BASE_URL
         value: https://api.openai.com/v1
       - key: MONGODB_URL
