@@ -79,6 +79,9 @@
 .setup-form label { display: grid; gap: 0.5rem; color: var(--text, #f5f7fa); font-weight: 600; }
 .setup-form input, .setup-form select { width: 100%; padding: 0.8rem 0.9rem; color: var(--text, #f5f7fa); background: var(--bg, #0a0d12); border: 1px solid var(--border, #252b35); border-radius: 0.65rem; }
 .setup-form small { color: var(--t3, #7d8794); font-weight: 400; }
+.setup-checkbox { display: flex !important; grid-template-columns: auto 1fr; align-items: center; gap: 0.6rem !important; font-weight: 500 !important; }
+.setup-checkbox input { width: auto; }
+.setup-public-note { margin-top: -0.85rem; }
 .setup-optional { color: var(--t3, #7d8794); font-weight: 400; }
 .setup-submit { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; }
 .setup-alert { display: flex; gap: 0.65rem; align-items: flex-start; margin-top: 1.25rem; padding: 0.9rem 1rem; border-radius: 0.7rem; line-height: 1.45; }

@@ -237,6 +237,14 @@ Learned N convention(s) from merged pull requests for aryen1101/Persona_Based_AI
 
 The learned rules are saved in MongoDB and are automatically loaded into future pull-request reviews. No CLI command is required.
 
+To test a public convention source, enable **Allow public repository sources** in the setup page and enter a public repository such as:
+
+```text
+redis/redis
+```
+
+PRHawk checks that the repository is public, learns from its merged pull requests using read-only anonymous GitHub API access, and stores the rules separately from installed-repository conventions. Private repositories still require the GitHub App to be installed.
+
 ## 11. Test webhook security
 
 This request has no valid GitHub signature and should return `401`:

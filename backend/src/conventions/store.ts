@@ -9,8 +9,13 @@ interface ConventionsDoc {
 export interface ConventionConfiguration {
   installationId: number;
   repository: string;
-  conventionSources: string[];
+  conventionSources: ConventionSource[];
   updatedAt: Date;
+}
+
+export interface ConventionSource {
+  repository: string;
+  visibility: "installation" | "public";
 }
 
 function conventionsCollection() {
@@ -47,7 +52,7 @@ export async function loadConventionConfiguration(
 export async function saveConventionConfiguration(
   installationId: number,
   repository: string,
-  conventionSources: string[],
+  conventionSources: ConventionSource[],
 ): Promise<void> {
   await configurationCollection().updateOne(
     { installationId, repository },

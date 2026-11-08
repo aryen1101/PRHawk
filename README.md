@@ -34,6 +34,7 @@ The CLI remains available for maintainers who want local dry runs or administrat
 - Inline comments on valid changed lines
 - Quality score and merge recommendation
 - Automatic convention learning after merged pull requests
+- Optional convention learning from public repositories
 - OpenAI-first with Groq fallback
 - Public install landing page
 - CLI for dry runs and local workflows
@@ -124,7 +125,7 @@ Set the GitHub App **Setup URL** to the deployed setup route:
 https://pr-hawk.vercel.app/setup
 ```
 
-After installation, GitHub redirects the user to this page. The user selects the repository to review and may optionally enter another repository as a convention source. PRHawk verifies that the App is installed on every selected repository before saving the configuration.
+After installation, GitHub redirects the user to this page. The user selects the repository to review and may optionally enter another repository as a convention source. Private sources require the App to be installed. Public sources can be enabled explicitly and are read anonymously.
 
 For local testing, expose port `3000` with an HTTPS tunnel such as ngrok, then use:
 

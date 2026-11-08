@@ -80,7 +80,7 @@ main.jsx                  React bootstrap
 index.css                 Landing page styling
 ```
 
-The frontend provides the public installation page and a post-install setup page. The setup page lists repositories accessible to the GitHub App and lets the user optionally select another repository as a convention source. It contains no secrets; all GitHub API calls are performed by the backend.
+The frontend provides the public installation page and a post-install setup page. The setup page lists repositories accessible to the GitHub App and lets the user optionally select another repository as a convention source. Public repository sources can be explicitly enabled; private sources require the App to be installed. It contains no secrets; all GitHub API calls are performed by the backend.
 
 The installation URL is configured with:
 

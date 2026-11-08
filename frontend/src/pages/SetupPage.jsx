@@ -12,6 +12,7 @@ export default function SetupPage() {
   const [repositories, setRepositories] = useState([]);
   const [targetRepository, setTargetRepository] = useState("");
   const [sourceRepository, setSourceRepository] = useState("");
+  const [allowPublicSource, setAllowPublicSource] = useState(false);
   const [loading, setLoading] = useState(Boolean(installationId));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -53,6 +54,7 @@ export default function SetupPage() {
           installationId,
           repository: targetRepository,
           conventionSources: sourceRepository.trim() ? [sourceRepository.trim()] : [],
+          allowPublicSource,
         }),
       });
       const data = await response.json();
@@ -110,6 +112,18 @@ export default function SetupPage() {
               />
               <small>{sourceHint}</small>
             </label>
+
+            <label className="setup-checkbox">
+              <input
+                type="checkbox"
+                checked={allowPublicSource}
+                onChange={(event) => setAllowPublicSource(event.target.checked)}
+              />
+              <span>Allow public repository sources</span>
+            </label>
+            <small className="setup-public-note">
+              Enable this for public repositories such as <code>redis/redis</code>. Private sources still require the App to be installed.
+            </small>
 
             <button className="btn btn-primary setup-submit" type="submit" disabled={saving || !targetRepository}>
               {saving ? <><LoaderCircle className="spin" size={16} /> Saving…</> : <>Save configuration <ArrowRight size={16} /></>}

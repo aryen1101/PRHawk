@@ -8,6 +8,23 @@ export type InstallationRepository = {
   private: boolean;
 };
 
+export async function isPublicRepository(repository: string): Promise<boolean> {
+  const response = await fetch(`${GITHUB_API}/repos/${repository}`, {
+    headers: {
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+  });
+
+  if (response.status === 404) return false;
+  if (!response.ok) {
+    throw new Error(`GitHub public repository check failed (HTTP ${response.status}).`);
+  }
+
+  const data = await response.json() as { private?: boolean };
+  return data.private === false;
+}
+
 function base64Url(value: string | Buffer): string {
   return Buffer.from(value).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }

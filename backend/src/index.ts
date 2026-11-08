@@ -14,12 +14,14 @@ import {
   loadConventions,
   saveConventionConfiguration,
 } from "./conventions/store.js";
+import type { ConventionSource } from "./conventions/store.js";
 import { learnConventions } from "./conventions/learner.js";
 import { config } from "./config.js";
 import type { ConventionRule } from "./types.js";
 import {
   getInstallationRepositories,
   getInstallationToken,
+  isPublicRepository,
   verifyWebhookSignature,
 } from "./github/appAuth.js";
 
@@ -41,7 +43,12 @@ async function getWebhookToken(installationId: number | undefined): Promise<stri
     : config.githubToken();
 }
 
-function repositoryScope(installationId: number | undefined, repository: string): string {
+function repositoryScope(
+  installationId: number | undefined,
+  repository: string,
+  visibility: "installation" | "public" = "installation",
+): string {
+  if (visibility === "public") return `github-public:${repository}`;
   return installationId
     ? `github-installation:${installationId}:${repository}`
     : `github-repository:${repository}`;
@@ -63,9 +70,12 @@ async function loadReviewConventions(
 
   const configuration = await loadConventionConfiguration(installationId, repository);
   const sourceRules = await Promise.all(
-    (configuration?.conventionSources ?? []).map((source) =>
-      loadConventions(repositoryScope(installationId, source)),
-    ),
+    (configuration?.conventionSources ?? []).map((source) => {
+      const normalized = typeof source === "string"
+        ? { repository: source, visibility: "installation" as const }
+        : source;
+      return loadConventions(repositoryScope(installationId, normalized.repository, normalized.visibility));
+    }),
   );
 
   const unique = new Map<string, ConventionRule>();
@@ -105,16 +115,20 @@ async function processPullRequestWebhook(payload: PullRequestWebhook): Promise<v
 
 async function processConventionLearning(
   installationId: number | undefined,
-  repository: string,
-  token: string,
+  source: ConventionSource,
+  installationToken: string,
 ): Promise<void> {
+  const [owner, repo] = source.repository.split("/");
   const rules = await learnConventions(
-    repositoryScope(installationId, repository),
-    repository.split("/")[0],
-    repository.split("/")[1],
-    token,
+    repositoryScope(installationId, source.repository, source.visibility),
+    owner,
+    repo,
+    source.visibility === "public" ? undefined : installationToken,
+    undefined,
+    undefined,
+    source.visibility === "public",
   );
-  console.log(`Learned ${rules.length} convention(s) for ${repository}.`);
+  console.log(`Learned ${rules.length} ${source.visibility} convention(s) for ${source.repository}.`);
 }
 
 async function processMergedPullRequestWebhook(payload: PullRequestWebhook): Promise<void> {
@@ -126,15 +140,22 @@ async function processMergedPullRequestWebhook(payload: PullRequestWebhook): Pro
   const ref = parseUrl(url);
   const token = await getWebhookToken(payload.installation?.id);
   const repository = `${ref.owner}/${ref.repo}`;
-  await processConventionLearning(payload.installation?.id, repository, token);
+  await processConventionLearning(
+    payload.installation?.id,
+    { repository, visibility: "installation" },
+    token,
+  );
 
   if (payload.installation?.id) {
     const configuration = await loadConventionConfiguration(payload.installation.id, repository);
-    for (const source of configuration?.conventionSources ?? []) {
+    for (const rawSource of configuration?.conventionSources ?? []) {
+      const source = typeof rawSource === "string"
+        ? { repository: rawSource, visibility: "installation" as const }
+        : rawSource;
       try {
         await processConventionLearning(payload.installation.id, source, token);
       } catch (err) {
-        console.error(`Convention learning skipped for ${source}:`, err instanceof Error ? err.message : err);
+        console.error(`Convention learning skipped for ${source.repository}:`, err instanceof Error ? err.message : err);
       }
     }
   }
@@ -243,6 +264,7 @@ function startServer(): void {
           .filter((source): source is string => Boolean(source)),
       ),
     ];
+    const allowPublicSource = req.body?.allowPublicSource === true;
 
     if (!Number.isInteger(installationId) || installationId <= 0 || !repository) {
       res.status(400).json({ error: "installationId and repository are required." });
@@ -252,27 +274,47 @@ function startServer(): void {
     try {
       const accessible = await getInstallationRepositories(installationId);
       const accessibleNames = new Set(accessible.map((item) => item.full_name.toLowerCase()));
-      const missingRepositories = [repository, ...conventionSources]
-        .filter((name) => !accessibleNames.has(name.toLowerCase()));
+      const missingRepositories = !accessibleNames.has(repository.toLowerCase()) ? [repository] : [];
+      const sourceConfigurations: ConventionSource[] = [];
+
+      for (const source of conventionSources) {
+        if (accessibleNames.has(source.toLowerCase())) {
+          sourceConfigurations.push({ repository: source, visibility: "installation" });
+          continue;
+        }
+
+        if (allowPublicSource && await isPublicRepository(source)) {
+          sourceConfigurations.push({ repository: source, visibility: "public" });
+          continue;
+        }
+
+        missingRepositories.push(source);
+      }
 
       if (missingRepositories.length > 0) {
         res.status(409).json({
-          error: "PRHawk is not installed on one or more selected repositories.",
+          error: allowPublicSource
+            ? "PRHawk cannot access one or more selected repositories. They must be installed or public."
+            : "PRHawk is not installed on one or more selected repositories.",
           missingRepositories,
         });
         return;
       }
 
-      await saveConventionConfiguration(installationId, repository, conventionSources);
+      await saveConventionConfiguration(installationId, repository, sourceConfigurations);
       const token = await getInstallationToken(installationId);
-      res.status(201).json({ installationId, repository, conventionSources });
+      res.status(201).json({
+        installationId,
+        repository,
+        conventionSources: sourceConfigurations,
+      });
 
-      void processConventionLearning(installationId, repository, token).catch((err) => {
+      void processConventionLearning(installationId, { repository, visibility: "installation" }, token).catch((err) => {
         console.error(`Initial convention learning skipped for ${repository}:`, err instanceof Error ? err.message : err);
       });
-      for (const source of conventionSources) {
+      for (const source of sourceConfigurations) {
         void processConventionLearning(installationId, source, token).catch((err) => {
-          console.error(`Initial convention learning skipped for ${source}:`, err instanceof Error ? err.message : err);
+          console.error(`Initial convention learning skipped for ${source.repository}:`, err instanceof Error ? err.message : err);
         });
       }
     } catch (err) {

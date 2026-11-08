@@ -18,8 +18,9 @@ export async function learnConventions(
   customToken?: string,
   customLlmKey?: string,
   customLlmBase?: string,
+  anonymous = false,
 ): Promise<ConventionRule[]> {
-  const client = getOctokitClient(customToken);
+  const client = getOctokitClient(customToken, anonymous);
 
   const { data: pulls } = await client.pulls.list({
     owner,
