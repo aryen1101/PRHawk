@@ -10,9 +10,13 @@ import {
 import { postReview } from "./github/reviewPublishers.js";
 import { reviewDiff } from "./review/reviewer.js";
 import {
+  addCustomConvention,
+  deleteCustomConvention,
   loadConventionConfiguration,
   loadConventions,
+  listConventions,
   saveConventionConfiguration,
+  updateCustomConvention,
 } from "./conventions/store.js";
 import type { ConventionSource } from "./conventions/store.js";
 import { learnConventions } from "./conventions/learner.js";
@@ -60,6 +64,19 @@ function parseRepositoryName(value: unknown): string | null {
   return match ? `${match[1]}/${match[2]}` : null;
 }
 
+function normalizeConventionSource(source: ConventionSource | string): ConventionSource {
+  return typeof source === "string"
+    ? { repository: source, visibility: "installation" }
+    : source;
+}
+
+async function ensureInstalledRepository(installationId: number, repository: string): Promise<void> {
+  const repositories = await getInstallationRepositories(installationId);
+  if (!repositories.some((item) => item.full_name.toLowerCase() === repository.toLowerCase())) {
+    throw new Error(`The GitHub App is not installed on ${repository}.`);
+  }
+}
+
 async function loadReviewConventions(
   installationId: number | undefined,
   repository: string,
@@ -71,9 +88,7 @@ async function loadReviewConventions(
   const configuration = await loadConventionConfiguration(installationId, repository);
   const sourceRules = await Promise.all(
     (configuration?.conventionSources ?? []).map((source) => {
-      const normalized = typeof source === "string"
-        ? { repository: source, visibility: "installation" as const }
-        : source;
+      const normalized = normalizeConventionSource(source);
       return loadConventions(repositoryScope(installationId, normalized.repository, normalized.visibility));
     }),
   );
@@ -84,6 +99,7 @@ async function loadReviewConventions(
   }
   return [...unique.values()];
 }
+
 
 async function processPullRequestWebhook(payload: PullRequestWebhook): Promise<void> {
   const pullRequest = payload.pull_request;
@@ -149,9 +165,7 @@ async function processMergedPullRequestWebhook(payload: PullRequestWebhook): Pro
   if (payload.installation?.id) {
     const configuration = await loadConventionConfiguration(payload.installation.id, repository);
     for (const rawSource of configuration?.conventionSources ?? []) {
-      const source = typeof rawSource === "string"
-        ? { repository: rawSource, visibility: "installation" as const }
-        : rawSource;
+      const source = normalizeConventionSource(rawSource);
       try {
         await processConventionLearning(payload.installation.id, source, token);
       } catch (err) {
@@ -230,6 +244,7 @@ function startServer(): void {
 
   app.get("/api/github/setup", async (req, res) => {
     const installationId = Number(req.query.installation_id);
+    const requestedRepository = parseRepositoryName(req.query.repository);
     if (!Number.isInteger(installationId) || installationId <= 0) {
       res.status(400).json({ error: "A valid installation_id is required." });
       return;
@@ -243,6 +258,9 @@ function startServer(): void {
           fullName: repository.full_name,
           private: repository.private,
         })),
+        configuration: requestedRepository
+          ? await loadConventionConfiguration(installationId, requestedRepository)
+          : null,
       });
     } catch (err) {
       res.status(403).json({
@@ -321,6 +339,114 @@ function startServer(): void {
       res.status(403).json({
         error: err instanceof Error ? err.message : "GitHub App installation could not be verified.",
       });
+    }
+  });
+
+  app.get("/api/github/rules", async (req, res) => {
+    const installationId = Number(req.query.installation_id);
+    const repository = parseRepositoryName(req.query.repository);
+    if (!Number.isInteger(installationId) || installationId <= 0 || !repository) {
+      res.status(400).json({ error: "installation_id and repository are required." });
+      return;
+    }
+
+    try {
+      await ensureInstalledRepository(installationId, repository);
+      const configuration = await loadConventionConfiguration(installationId, repository);
+      const targetScope = repositoryScope(installationId, repository);
+      const targetRules = await listConventions(targetScope);
+      const sources = await Promise.all((configuration?.conventionSources ?? []).map(async (rawSource) => {
+        const source = normalizeConventionSource(rawSource);
+        const scope = repositoryScope(installationId, source.repository, source.visibility);
+        return { ...source, scope, rules: await listConventions(scope) };
+      }));
+
+      res.json({
+        repository,
+        sources,
+        targetRules,
+        effectiveRules: await loadReviewConventions(installationId, repository),
+      });
+    } catch (err) {
+      res.status(403).json({ error: err instanceof Error ? err.message : "Could not load convention rules." });
+    }
+  });
+
+  app.post("/api/github/rules", async (req, res) => {
+    const installationId = Number(req.body?.installationId);
+    const repository = parseRepositoryName(req.body?.repository);
+    const severity = req.body?.severity;
+    const rule = typeof req.body?.rule === "string" ? req.body.rule.trim() : "";
+    const rationale = typeof req.body?.rationale === "string" ? req.body.rationale.trim() : "";
+    if (!Number.isInteger(installationId) || installationId <= 0 || !repository || !rule || !rationale ||
+      !["bug", "security", "style", "suggestion", "performance"].includes(severity)) {
+      res.status(400).json({ error: "repository, rule, rationale, and a valid severity are required." });
+      return;
+    }
+
+    try {
+      await ensureInstalledRepository(installationId, repository);
+      const created = await addCustomConvention(repositoryScope(installationId, repository), {
+        rule,
+        rationale,
+        severity,
+        enabled: true,
+      });
+      res.status(201).json(created);
+    } catch (err) {
+      res.status(403).json({ error: err instanceof Error ? err.message : "Could not add custom rule." });
+    }
+  });
+
+  app.patch("/api/github/rules", async (req, res) => {
+    const installationId = Number(req.body?.installationId);
+    const repository = parseRepositoryName(req.body?.repository);
+    const id = typeof req.body?.id === "string" ? req.body.id : "";
+    if (!Number.isInteger(installationId) || installationId <= 0 || !repository || !id) {
+      res.status(400).json({ error: "installationId, repository, and rule id are required." });
+      return;
+    }
+
+    try {
+      await ensureInstalledRepository(installationId, repository);
+      const update = {
+        ...(typeof req.body?.rule === "string" ? { rule: req.body.rule.trim() } : {}),
+        ...(typeof req.body?.rationale === "string" ? { rationale: req.body.rationale.trim() } : {}),
+        ...(typeof req.body?.enabled === "boolean" ? { enabled: req.body.enabled } : {}),
+        ...(["bug", "security", "style", "suggestion", "performance"].includes(req.body?.severity)
+          ? { severity: req.body.severity }
+          : {}),
+      };
+      const updated = await updateCustomConvention(repositoryScope(installationId, repository), id, update);
+      if (!updated) {
+        res.status(404).json({ error: "Custom rule not found." });
+        return;
+      }
+      res.json(updated);
+    } catch (err) {
+      res.status(403).json({ error: err instanceof Error ? err.message : "Could not update custom rule." });
+    }
+  });
+
+  app.delete("/api/github/rules", async (req, res) => {
+    const installationId = Number(req.body?.installationId);
+    const repository = parseRepositoryName(req.body?.repository);
+    const id = typeof req.body?.id === "string" ? req.body.id : "";
+    if (!Number.isInteger(installationId) || installationId <= 0 || !repository || !id) {
+      res.status(400).json({ error: "installationId, repository, and rule id are required." });
+      return;
+    }
+
+    try {
+      await ensureInstalledRepository(installationId, repository);
+      const deleted = await deleteCustomConvention(repositoryScope(installationId, repository), id);
+      if (!deleted) {
+        res.status(404).json({ error: "Custom rule not found." });
+        return;
+      }
+      res.sendStatus(204);
+    } catch (err) {
+      res.status(403).json({ error: err instanceof Error ? err.message : "Could not delete custom rule." });
     }
   });
 

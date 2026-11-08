@@ -80,7 +80,7 @@ main.jsx                  React bootstrap
 index.css                 Landing page styling
 ```
 
-The frontend provides the public installation page and a post-install setup page. The setup page lists repositories accessible to the GitHub App and lets the user optionally select another repository as a convention source. Public repository sources can be explicitly enabled; private sources require the App to be installed. It contains no secrets; all GitHub API calls are performed by the backend.
+The frontend provides the public installation page and a post-install setup page. The setup page lists repositories accessible to the GitHub App, supports multiple convention sources, and provides view/add/edit/disable/delete controls for target-repository custom rules. Public repository sources can be explicitly enabled; private sources require the App to be installed. It contains no secrets; all GitHub API calls are performed by the backend.
 
 The installation URL is configured with:
 
@@ -102,6 +102,10 @@ The backend provides:
 POST /api/github/webhook    GitHub App webhook receiver
 GET  /api/github/setup      List repositories available to an App installation
 POST /api/github/setup      Save target and optional convention-source repositories
+GET  /api/github/rules      View target and source rules
+POST /api/github/rules     Add a custom target rule
+PATCH /api/github/rules    Update or enable/disable a custom rule
+DELETE /api/github/rules  Delete a custom target rule
 GET  /api/health            Service health check
 ```
 

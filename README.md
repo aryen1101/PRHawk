@@ -35,6 +35,7 @@ The CLI remains available for maintainers who want local dry runs or administrat
 - Quality score and merge recommendation
 - Automatic convention learning after merged pull requests
 - Optional convention learning from public repositories
+- Multiple convention sources and custom rule management
 - OpenAI-first with Groq fallback
 - Public install landing page
 - CLI for dry runs and local workflows
@@ -125,7 +126,7 @@ Set the GitHub App **Setup URL** to the deployed setup route:
 https://pr-hawk.vercel.app/setup
 ```
 
-After installation, GitHub redirects the user to this page. The user selects the repository to review and may optionally enter another repository as a convention source. Private sources require the App to be installed. Public sources can be enabled explicitly and are read anonymously.
+After installation, GitHub redirects the user to this page. The user selects the repository to review, adds or removes multiple convention sources, and manages custom rules. Private sources require the App to be installed. Public sources can be enabled explicitly and are read anonymously.
 
 For local testing, expose port `3000` with an HTTPS tunnel such as ngrok, then use:
 
@@ -190,6 +191,10 @@ Learned conventions are stored in MongoDB and are scoped to the GitHub installat
 POST /api/github/webhook  GitHub App webhook receiver
 GET  /api/github/setup    List repositories available to an App installation
 POST /api/github/setup    Save target and optional convention-source repositories
+GET  /api/github/rules    View target and source rules
+POST /api/github/rules   Add a custom target rule
+PATCH /api/github/rules  Update or enable/disable a custom rule
+DELETE /api/github/rules Delete a custom target rule
 GET  /api/health          Service health check
 ```
 

@@ -70,6 +70,7 @@
   background: var(--surface, #11161e);
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
 }
+.setup-card-wide { width: min(100%, 900px); }
 
 .setup-brand { color: var(--text, #f5f7fa); font-size: 1.25rem; font-weight: 800; text-decoration: none; }
 .setup-brand span { color: #7ee787; }
@@ -79,6 +80,26 @@
 .setup-form label { display: grid; gap: 0.5rem; color: var(--text, #f5f7fa); font-weight: 600; }
 .setup-form input, .setup-form select { width: 100%; padding: 0.8rem 0.9rem; color: var(--text, #f5f7fa); background: var(--bg, #0a0d12); border: 1px solid var(--border, #252b35); border-radius: 0.65rem; }
 .setup-form small { color: var(--t3, #7d8794); font-weight: 400; }
+.setup-field { display: grid; gap: 0.5rem; margin-top: 2rem; color: var(--text, #f5f7fa); font-weight: 600; }
+.setup-section { margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid var(--border, #252b35); }
+.setup-section-heading h2 { margin: 0; font-size: 1.1rem; }
+.setup-section-heading p { margin: 0.35rem 0 1rem; color: var(--t2, #aab3c0); }
+.setup-add-row, .setup-rule-form { display: flex; flex-wrap: wrap; gap: 0.65rem; }
+.setup-add-row input { flex: 1 1 18rem; }
+.setup-rule-form input { flex: 1 1 15rem; }
+.setup-rule-form select { width: auto; }
+.setup-list-row { display: flex; justify-content: space-between; align-items: center; padding: 0.65rem 0; border-bottom: 1px solid var(--border, #252b35); }
+.setup-list-row em, .setup-rule-source { margin-left: 0.35rem; color: #8ee6a3; font-size: 0.75rem; font-style: normal; }
+.setup-muted { color: var(--t3, #7d8794); }
+.icon-button { display: inline-grid; place-items: center; padding: 0.35rem; color: var(--t2, #aab3c0); background: transparent; border: 0; cursor: pointer; }
+.setup-rule-groups { margin-top: 1.5rem; }
+.setup-rule-groups h3 { margin: 1.25rem 0 0.65rem; font-size: 0.85rem; color: var(--t2, #aab3c0); }
+.setup-rule-row { display: flex; justify-content: space-between; gap: 1rem; padding: 0.8rem 0; border-bottom: 1px solid var(--border, #252b35); }
+.setup-rule-row strong { color: var(--text, #f5f7fa); }
+.setup-rule-row p { margin: 0.3rem 0; color: var(--t2, #aab3c0); }
+.setup-rule-row small { color: var(--t3, #7d8794); }
+.setup-rule-row.is-disabled { opacity: 0.55; }
+.setup-rule-actions { display: flex; align-items: center; }
 .setup-checkbox { display: flex !important; grid-template-columns: auto 1fr; align-items: center; gap: 0.6rem !important; font-weight: 500 !important; }
 .setup-checkbox input { width: auto; }
 .setup-public-note { margin-top: -0.85rem; }

@@ -13,9 +13,12 @@ export interface ParsedFile {
 }
 
 export interface ConventionRule {
+    id?: string,
     rule : string,
     rationale : string,
-    severity : Severity
+    severity : Severity,
+    kind?: "learned" | "custom",
+    enabled?: boolean,
 }
 
 export interface FileContext {
