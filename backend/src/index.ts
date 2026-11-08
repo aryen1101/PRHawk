@@ -1,4 +1,5 @@
 import express from "express";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -286,10 +287,12 @@ function startServer(): void {
   });
 
   const frontendDist = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "frontend", "dist");
-  app.use(express.static(frontendDist));
-  app.get(/^(?!\/api(?:\/|$)).*/, (_req, res) => {
-    res.sendFile(path.join(frontendDist, "index.html"));
-  });
+  if (existsSync(frontendDist)) {
+    app.use(express.static(frontendDist));
+    app.get(/^(?!\/api(?:\/|$)).*/, (_req, res) => {
+      res.sendFile(path.join(frontendDist, "index.html"));
+    });
+  }
 
   const port = Number(process.env.PORT) || 3000;
   app.listen(port, () => {
