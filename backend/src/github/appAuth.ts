@@ -31,7 +31,12 @@ function base64Url(value: string | Buffer): string {
 
 function createAppJwt(): string {
   const appId = process.env.GITHUB_APP_ID;
-  const privateKey = process.env.GITHUB_APP_PRIVATE_KEY?.replace(/\\n/g, "\n");
+  const privateKey = process.env.GITHUB_APP_PRIVATE_KEY
+    ?.trim()
+    .replace(/^(["'])([\s\S]*)\1$/, "$2")
+    .replace(/\\n/g, "\n")
+    .replace(/\\r/g, "")
+    .replace(/\r\n/g, "\n");
   if (!appId || !privateKey) {
     throw new Error("GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY are required for GitHub App webhook reviews.");
   }
