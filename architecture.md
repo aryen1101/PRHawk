@@ -37,8 +37,11 @@ flowchart LR
 Source: `frontend/src/`
 
 - `App.jsx` routes `/setup` to the setup page and all other paths to the landing page.
-- `LandingPage.jsx` explains the product and links to GitHub App installation.
-- `SetupPage.jsx` displays repositories accessible to an installation, manages convention sources, displays learned/custom rules, and supports custom-rule CRUD.
+- `pages/LandingPage.jsx` explains the product and links to GitHub App installation. Its hero and example section render a real PRHawk review (PR #2 on `aryen1101/Persona_Based_AIChatbot`) from `data/exampleReview.js` through `components/ReviewPreview.jsx`, with a severity filter and expandable inline comments. The rules panel in the conventions section is labelled as an example.
+- `pages/SetupPage.jsx` is the settings screen: GitHub sign-in, an installation picker, a repository list, figures from the rules API (effective rules, sources, custom rules), and Sources and Rules tabs (the tab is kept in `?tab=`). It manages convention sources, displays learned and custom rules grouped by origin with a severity filter, and supports custom-rule CRUD. Source edits are local until **Save sources**; unsaved changes are flagged on the page, and switching repository or installation, signing out, or reloading asks first. In-app navigation through the logo does not warn.
+- `components/` holds `Brand` (logo mark and wordmark), `SeverityTag` and `ReviewPreview`; `lib/` holds public config (`installUrl`, `apiUrl`), the five severities and a small JavaScript highlighter.
+- `styles/tokens.css` defines the design tokens (colour in OKLCH, type, spacing, motion), `styles/base.css` the element defaults, `index.css` the shared components and landing page, and `styles/app.css` the settings screen. The theme is dark, with the logo's violet as the only accent, Geist for text and Geist Mono for code.
+- `hooks/useLandingMotion.js` runs Lenis smooth scrolling synced to GSAP ScrollTrigger, one hero entrance and once-only section reveals. All of it is skipped under `prefers-reduced-motion`; content is visible without the animations.
 - `frontend/.env` provides `VITE_API_BASE_URL` and `VITE_GITHUB_APP_INSTALL_URL`. These values are compiled into the browser bundle and must not contain secrets.
 - `frontend/vercel.json` proxies `/api/*` to the Render backend, so the browser talks to a single origin and the session cookie is first-party, and rewrites client-side routes such as `/setup` to `index.html` so React Router can render them.
 
@@ -330,6 +333,7 @@ The real values in `.env` files and hosting settings are secrets and must not be
 - OpenAI failures: retry up to three times, then try Groq if configured. Client errors that cannot succeed on retry (4xx such as context too long or bad credentials, except 408/409/429) move to the next provider immediately.
 - Malformed model output: retry and then try the next provider.
 - Invalid inline comment positions: filter them before publishing.
+- The frontend is client-rendered, so the site shows only a `<noscript>` message with JavaScript disabled. Reviews on GitHub are unaffected.
 - Learning deduplication is in-memory. With several backend instances, two instances could occasionally learn the same scope at once; a MongoDB lock would be needed to prevent that.
 - Convention-learning input and output are capped to reduce TPM errors; large repositories may therefore be represented by a sample of recent merged PRs rather than their full history.
 - Anonymous public GitHub API access is subject to unauthenticated rate limits.
@@ -368,11 +372,29 @@ PRHawk/
 ├── frontend/
 │   ├── .env.example
 │   ├── vercel.json
+│   ├── index.html
+│   ├── public/                 # logo mark, favicons
 │   └── src/
 │       ├── App.jsx
-│       └── pages/
-│           ├── LandingPage.jsx
-│           └── SetupPage.jsx
+│       ├── main.jsx
+│       ├── index.css           # shared components and landing page
+│       ├── components/
+│       │   ├── Brand.jsx
+│       │   ├── ReviewPreview.jsx
+│       │   └── SeverityTag.jsx
+│       ├── data/exampleReview.js
+│       ├── hooks/useLandingMotion.js
+│       ├── lib/
+│       │   ├── config.js
+│       │   ├── highlight.jsx
+│       │   └── severity.js
+│       ├── pages/
+│       │   ├── LandingPage.jsx
+│       │   └── SetupPage.jsx
+│       └── styles/
+│           ├── tokens.css
+│           ├── base.css
+│           └── app.css
 ├── render.yaml
 ├── README.md
 └── architecture.md
