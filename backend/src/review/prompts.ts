@@ -1,11 +1,6 @@
 import type { ConventionRule, FileContext } from "../types.js";
 
-function numberLines(content: string): string {
-  return content
-    .split("\n")
-    .map((line, i) => `${i + 1}\t${line}`)
-    .join("\n");
-}
+const MAX_PR_BODY_CHARS = 4000;
 
 const SEVERITY_DEFINITIONS = `Severity taxonomy (tag every comment with exactly one):
 - bug: a defect that produces incorrect behaviour, a crash, or a test failure.
@@ -23,15 +18,16 @@ export function buildReviewSystemPrompt(conventions: ConventionRule[]): string {
       : "No learned team conventions are available yet. Review against general best practices.";
 
   return [
-    "You are Code Review Copilot, a senior software engineer reviewing a GitHub pull request.",
+    "You are PRHawk, a senior software engineer reviewing a GitHub pull request.",
     "Your job is to catch mechanical review issues (bugs, security, performance, style) so human reviewers can focus on architecture, and to teach junior developers as you review.",
     "",
     SEVERITY_DEFINITIONS,
     "",
     "Rules for inline comments:",
     "- Only comment on lines listed as addable for each file. Never invent a line number.",
-    "- The `line` field MUST be the line number printed at the start of the exact line of code your comment is about — read it directly off the numbered file content; do not count or estimate.",
-    "- Use the full file content provided to understand context beyond the changed lines (imports, class definitions, dependencies).",
+    "- The `line` field MUST be the line number printed at the start of the exact line of code your comment is about — read it directly off the numbered code; do not count or estimate.",
+    "- Use the surrounding code provided to understand context beyond the changed lines. It is an excerpt: \"…\" marks omitted lines, so do not assume code you cannot see is missing.",
+    "- Some changed files may be left out of large pull requests; review only the files provided.",
     "- Each comment must contain three parts: the issue, why it matters in production (plain English a junior can follow without research), and a concrete suggested fix.",
     "- Be precise and avoid noise: do not comment on lines that are fine. Prefer a few high-value comments over many trivial ones.",
     "",
@@ -57,19 +53,23 @@ export function buildReviewUserPrompt(
         c.patch,
         "```",
         "",
-        "Full file content at PR head. Each line is prefixed with its line number.",
-        "Set a comment's `line` to the exact number printed at the start of the line",
-        "your comment is about (and it must be one of the addable line numbers above).",
+        "Code at PR head around the changed lines. Each line is prefixed with its real line number;",
+        "\"…\" marks omitted lines. Set a comment's `line` to the exact number printed at the start",
+        "of the line your comment is about (and it must be one of the addable line numbers above).",
         "```",
-        c.content ? numberLines(c.content) : "[content unavailable]",
+        c.excerpt || "[surrounding code omitted: size limit or unavailable — use the diff]",
         "```",
       ].join("\n");
     })
     .join("\n\n");
 
+  const body = prBody.length > MAX_PR_BODY_CHARS
+    ? `${prBody.slice(0, MAX_PR_BODY_CHARS)}\n... [description truncated]`
+    : prBody;
+
   return [
-    `Pull request title: ${prTitle || "(none)"}`,
-    `Pull request description: ${prBody || "(none)"}`,
+    `Pull request title: ${prTitle.slice(0, 300) || "(none)"}`,
+    `Pull request description: ${body || "(none)"}`,
     "",
     "Review the following changed files.",
     "",

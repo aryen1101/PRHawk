@@ -1,5 +1,5 @@
 import { getOctokitClient } from "./client.js";
-import type { PullRequestRef, Severity } from "../types.js";
+import type { PullRequestRef, Severity, SkippedFile } from "../types.js";
 import type {
   InlineComment,
   ReviewResult,
@@ -25,6 +25,7 @@ export async function postReview(
   headSha: string,
   result: ReviewResult,
   customToken?: string,
+  skipped: SkippedFile[] = [],
 ): Promise<void> {
   const client = getOctokitClient(customToken);
 
@@ -41,7 +42,7 @@ export async function postReview(
       repo: ref.repo,
       pull_number: ref.pullNumber,
       commit_id: headSha,
-      body: formatSummaryBody(result.summary),
+      body: formatSummaryBody(result.summary, skipped),
       event: "COMMENT",
       comments,
     });
@@ -79,9 +80,40 @@ function formatCommentBody(c: InlineComment): string {
   ].join("\n");
 }
 
-function formatSummaryBody(s: RiskSummary): string {
+/** Posts a short PR comment explaining that the automated review failed. */
+export async function postReviewFailure(
+  ref: PullRequestRef,
+  headSha: string,
+  reason: string,
+  customToken?: string,
+): Promise<void> {
+  const client = getOctokitClient(customToken);
+  await client.issues.createComment({
+    owner: ref.owner,
+    repo: ref.repo,
+    issue_number: ref.pullNumber,
+    body: [
+      `## ⚠️ PRHawk couldn't review this pull request`,
+      "",
+      `The automated review of commit \`${headSha.slice(0, 7)}\` did not complete: ${reason}`,
+      "",
+      "Push a new commit to retry. If this keeps happening, ask the repository maintainer to check the PRHawk server logs.",
+    ].join("\n"),
+  });
+}
+
+const MAX_SKIPPED_LISTED = 20;
+
+function formatSkipped(skipped: SkippedFile[]): string[] {
+  if (skipped.length === 0) return [];
+  const listed = skipped.slice(0, MAX_SKIPPED_LISTED).map((f) => `- \`${f.path}\` — ${f.reason}`);
+  const more = skipped.length > MAX_SKIPPED_LISTED ? [`- …and ${skipped.length - MAX_SKIPPED_LISTED} more`] : [];
+  return ["", `**Not fully reviewed (${skipped.length} file${skipped.length === 1 ? "" : "s"}):**`, ...listed, ...more];
+}
+
+function formatSummaryBody(s: RiskSummary, skipped: SkippedFile[]): string {
   return [
-    "## 🔍 Code Review Copilot — Risk Summary",
+    "## 🔍 PRHawk — Risk Summary",
     "",
     `**Quality score:** ${s.qualityScore}/100`,
     `**Recommended decision:** ${DECISION_LABEL[s.mergeDecision]}`,
@@ -92,6 +124,7 @@ function formatSummaryBody(s: RiskSummary): string {
       : ["- None identified"]),
     "",
     `**Rationale:** ${s.rationale}`,
+    ...formatSkipped(skipped),
     "",
     "_Severity tags: 🐞 bug · 🔒 security · ⚡ performance · 🎨 style · 💡 suggestion_",
   ].join("\n");

@@ -7,27 +7,27 @@ import {
   fetchPullRequest,
   buildFileContexts,
 } from "./github/prService.js";
-import { postReview } from "./github/reviewPublishers.js";
+import { postReview, postReviewFailure } from "./github/reviewPublishers.js";
 import { reviewDiff } from "./review/reviewer.js";
 import {
   addCustomConvention,
   deleteCustomConvention,
   loadConventionConfiguration,
-  loadConventions,
   listConventions,
   saveConventionConfiguration,
   updateCustomConvention,
 } from "./conventions/store.js";
 import type { ConventionSource } from "./conventions/store.js";
-import { learnConventions } from "./conventions/learner.js";
+import { learnConventionsIfStale } from "./conventions/learner.js";
+import { loadReviewConventions, normalizeConventionSource, repositoryScope } from "./conventions/scopes.js";
 import { config } from "./config.js";
-import type { ConventionRule } from "./types.js";
 import {
   getInstallationRepositories,
   getInstallationToken,
-  isPublicRepository,
+  getPublicRepositoryName,
   verifyWebhookSignature,
 } from "./github/appAuth.js";
+import { isAuthConfigured, registerAuthRoutes, requireInstallationAccess } from "./auth.js";
 
 type PullRequestWebhook = {
   action?: string;
@@ -47,57 +47,27 @@ async function getWebhookToken(installationId: number | undefined): Promise<stri
     : config.githubToken();
 }
 
-function repositoryScope(
-  installationId: number | undefined,
-  repository: string,
-  visibility: "installation" | "public" = "installation",
-): string {
-  if (visibility === "public") return `github-public:${repository}`;
-  return installationId
-    ? `github-installation:${installationId}:${repository}`
-    : `github-repository:${repository}`;
-}
-
 function parseRepositoryName(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const match = value.trim().match(/^(?:https:\/\/github\.com\/)?([^/]+)\/([^/]+?)(?:\.git)?\/?$/i);
   return match ? `${match[1]}/${match[2]}` : null;
 }
 
-function normalizeConventionSource(source: ConventionSource | string): ConventionSource {
-  return typeof source === "string"
-    ? { repository: source, visibility: "installation" }
-    : source;
+/** Case-insensitive lookup of installation repositories by "owner/name". */
+function canonicalNames(repositories: { full_name: string }[]): Map<string, string> {
+  return new Map(repositories.map((item) => [item.full_name.toLowerCase(), item.full_name]));
 }
 
-async function ensureInstalledRepository(installationId: number, repository: string): Promise<void> {
-  const repositories = await getInstallationRepositories(installationId);
-  if (!repositories.some((item) => item.full_name.toLowerCase() === repository.toLowerCase())) {
+/**
+ * Verifies the App is installed on the repository and returns its canonical
+ * "owner/name" (GitHub's casing), which is used for scopes and configuration.
+ */
+async function resolveInstalledRepository(installationId: number, repository: string): Promise<string> {
+  const canonical = canonicalNames(await getInstallationRepositories(installationId)).get(repository.toLowerCase());
+  if (!canonical) {
     throw new Error(`The GitHub App is not installed on ${repository}.`);
   }
-}
-
-async function loadReviewConventions(
-  installationId: number | undefined,
-  repository: string,
-): Promise<ConventionRule[]> {
-  const ownScope = repositoryScope(installationId, repository);
-  const ownRules = await loadConventions(ownScope);
-  if (!installationId) return ownRules;
-
-  const configuration = await loadConventionConfiguration(installationId, repository);
-  const sourceRules = await Promise.all(
-    (configuration?.conventionSources ?? []).map((source) => {
-      const normalized = normalizeConventionSource(source);
-      return loadConventions(repositoryScope(installationId, normalized.repository, normalized.visibility));
-    }),
-  );
-
-  const unique = new Map<string, ConventionRule>();
-  for (const rule of [...ownRules, ...sourceRules.flat()]) {
-    unique.set(`${rule.severity}:${rule.rule}`, rule);
-  }
-  return [...unique.values()];
+  return canonical;
 }
 
 
@@ -111,38 +81,72 @@ async function processPullRequestWebhook(payload: PullRequestWebhook): Promise<v
 
   const ref = parseUrl(url);
   const token = await getWebhookToken(payload.installation?.id);
-  const { pr, files } = await fetchPullRequest(ref, token);
-  const contexts = await buildFileContexts(ref, pr, files, token);
-  if (contexts.length === 0) {
-    console.log(`No reviewable changes found for ${url}.`);
-    return;
-  }
 
-  const conventions = await loadReviewConventions(payload.installation?.id, `${ref.owner}/${ref.repo}`);
-  const result = await reviewDiff(
-    pullRequest.title ?? pr.title ?? "",
-    pullRequest.body ?? pr.body ?? "",
-    contexts,
-    conventions,
-  );
-  await postReview(ref, sha, result, token);
-  console.log(`Webhook review posted for ${url}: ${result.comments.length} comment(s).`);
+  try {
+    const { pr, files } = await fetchPullRequest(ref, token);
+    const { contexts, skipped } = await buildFileContexts(ref, pr, files, token);
+    if (contexts.length === 0) {
+      console.log(`No reviewable changes found for ${url} (${skipped.length} file(s) skipped).`);
+      return;
+    }
+
+    const conventions = await loadReviewConventions(payload.installation?.id, `${ref.owner}/${ref.repo}`);
+    const result = await reviewDiff(
+      pullRequest.title ?? pr.title ?? "",
+      pullRequest.body ?? pr.body ?? "",
+      contexts,
+      conventions,
+    );
+    await postReview(ref, sha, result, token, skipped);
+    console.log(
+      `Webhook review posted for ${url}: ${result.comments.length} comment(s), ` +
+        `${contexts.length} file(s) reviewed, ${skipped.length} not fully reviewed.`,
+    );
+  } catch (err) {
+    await postReviewFailure(ref, sha, describeReviewFailure(err), token).catch((commentErr) => {
+      console.error("Could not post review failure comment:", commentErr instanceof Error ? commentErr.message : commentErr);
+    });
+    throw err;
+  }
 }
+
+/** A short, non-sensitive reason for the PR failure comment; details stay in the logs. */
+function describeReviewFailure(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  if (message.startsWith("All configured AI providers failed")) {
+    return "the AI provider could not process the request. It may be temporarily unavailable or the change may be too large.";
+  }
+  if (message.includes("HTTP 422")) {
+    return "GitHub rejected the review comments.";
+  }
+  return "an internal error occurred.";
+}
+
+/** Minimum gap between relearning a target repository after merges. */
+const TARGET_RELEARN_COOLDOWN_MS = 10 * 60 * 1000;
+/** Convention sources (and targets on setup save) are relearned at most this often. */
+const SOURCE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 async function processConventionLearning(
   installationId: number | undefined,
   source: ConventionSource,
   installationToken: string,
+  maxAgeMs: number,
 ): Promise<void> {
   const [owner, repo] = source.repository.split("/");
-  const rules = await learnConventions(
+  const outcome = await learnConventionsIfStale(
     repositoryScope(installationId, source.repository, source.visibility),
     owner,
     repo,
+    maxAgeMs,
     source.visibility === "public" ? undefined : installationToken,
     source.visibility === "public",
   );
-  console.log(`Learned ${rules.length} ${source.visibility} convention(s) for ${source.repository}.`);
+  if (outcome.status === "skipped") {
+    console.log(`Convention learning skipped for ${source.repository}: ${outcome.reason}.`);
+  } else {
+    console.log(`Learned ${outcome.rules.length} ${source.visibility} convention(s) for ${source.repository}.`);
+  }
 }
 
 async function processMergedPullRequestWebhook(payload: PullRequestWebhook): Promise<void> {
@@ -158,14 +162,16 @@ async function processMergedPullRequestWebhook(payload: PullRequestWebhook): Pro
     payload.installation?.id,
     { repository, visibility: "installation" },
     token,
+    TARGET_RELEARN_COOLDOWN_MS,
   );
 
+  // Sources are not affected by this merge; refresh only the ones that are stale.
   if (payload.installation?.id) {
     const configuration = await loadConventionConfiguration(payload.installation.id, repository);
     for (const rawSource of configuration?.conventionSources ?? []) {
       const source = normalizeConventionSource(rawSource);
       try {
-        await processConventionLearning(payload.installation.id, source, token);
+        await processConventionLearning(payload.installation.id, source, token, SOURCE_MAX_AGE_MS);
       } catch (err) {
         console.error(`Convention learning skipped for ${source.repository}:`, err instanceof Error ? err.message : err);
       }
@@ -189,7 +195,7 @@ function startServer(): void {
       res.header("Access-Control-Allow-Origin", origin);
       res.header("Access-Control-Allow-Credentials", "true");
       res.header("Vary", "Origin");
-      res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+      res.header("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
       res.header("Access-Control-Allow-Headers", "Content-Type");
     }
     if (req.method === "OPTIONS") {
@@ -239,6 +245,7 @@ function startServer(): void {
   });
 
   app.use(express.json());
+  registerAuthRoutes(app);
 
   app.get("/api/github/setup", async (req, res) => {
     const installationId = Number(req.query.installation_id);
@@ -247,6 +254,7 @@ function startServer(): void {
       res.status(400).json({ error: "A valid installation_id is required." });
       return;
     }
+    if (!requireInstallationAccess(req, res, installationId)) return;
 
     try {
       const repositories = await getInstallationRepositories(installationId);
@@ -257,7 +265,10 @@ function startServer(): void {
           private: repository.private,
         })),
         configuration: requestedRepository
-          ? await loadConventionConfiguration(installationId, requestedRepository)
+          ? await loadConventionConfiguration(
+            installationId,
+            canonicalNames(repositories).get(requestedRepository.toLowerCase()) ?? requestedRepository,
+          )
           : null,
       });
     } catch (err) {
@@ -269,45 +280,53 @@ function startServer(): void {
 
   app.post("/api/github/setup", async (req, res) => {
     const installationId = Number(req.body?.installationId);
-    const repository = parseRepositoryName(req.body?.repository);
+    const requestedRepository = parseRepositoryName(req.body?.repository);
     const requestedSources: unknown[] = Array.isArray(req.body?.conventionSources)
       ? req.body.conventionSources
       : [];
-    const conventionSources = [
-      ...new Set(
-        requestedSources
-          .map((source) => parseRepositoryName(source))
-          .filter((source): source is string => Boolean(source)),
-      ),
-    ];
+    const conventionSources = requestedSources
+      .map((source) => parseRepositoryName(source))
+      .filter((source): source is string => Boolean(source));
     const allowPublicSource = req.body?.allowPublicSource === true;
 
-    if (!Number.isInteger(installationId) || installationId <= 0 || !repository) {
+    if (!Number.isInteger(installationId) || installationId <= 0 || !requestedRepository) {
       res.status(400).json({ error: "installationId and repository are required." });
       return;
     }
+    if (!requireInstallationAccess(req, res, installationId)) return;
 
     try {
-      const accessible = await getInstallationRepositories(installationId);
-      const accessibleNames = new Set(accessible.map((item) => item.full_name.toLowerCase()));
-      const missingRepositories = !accessibleNames.has(repository.toLowerCase()) ? [repository] : [];
+      const accessible = canonicalNames(await getInstallationRepositories(installationId));
+      const repository = accessible.get(requestedRepository.toLowerCase());
+      const missingRepositories = repository ? [] : [requestedRepository];
       const sourceConfigurations: ConventionSource[] = [];
+      const seenSources = new Set<string>();
+      const addSource = (source: ConventionSource): void => {
+        const key = source.repository.toLowerCase();
+        if (seenSources.has(key)) return;
+        seenSources.add(key);
+        sourceConfigurations.push(source);
+      };
 
       for (const source of conventionSources) {
-        if (accessibleNames.has(source.toLowerCase())) {
-          sourceConfigurations.push({ repository: source, visibility: "installation" });
+        if (seenSources.has(source.toLowerCase())) continue;
+
+        const installed = accessible.get(source.toLowerCase());
+        if (installed) {
+          addSource({ repository: installed, visibility: "installation" });
           continue;
         }
 
-        if (allowPublicSource && await isPublicRepository(source)) {
-          sourceConfigurations.push({ repository: source, visibility: "public" });
+        const publicName = allowPublicSource ? await getPublicRepositoryName(source) : null;
+        if (publicName) {
+          addSource({ repository: publicName, visibility: "public" });
           continue;
         }
 
         missingRepositories.push(source);
       }
 
-      if (missingRepositories.length > 0) {
+      if (!repository || missingRepositories.length > 0) {
         res.status(409).json({
           error: allowPublicSource
             ? "PRHawk cannot access one or more selected repositories. They must be installed or public."
@@ -325,11 +344,11 @@ function startServer(): void {
         conventionSources: sourceConfigurations,
       });
 
-      void processConventionLearning(installationId, { repository, visibility: "installation" }, token).catch((err) => {
+      void processConventionLearning(installationId, { repository, visibility: "installation" }, token, SOURCE_MAX_AGE_MS).catch((err) => {
         console.error(`Initial convention learning skipped for ${repository}:`, err instanceof Error ? err.message : err);
       });
       for (const source of sourceConfigurations) {
-        void processConventionLearning(installationId, source, token).catch((err) => {
+        void processConventionLearning(installationId, source, token, SOURCE_MAX_AGE_MS).catch((err) => {
           console.error(`Initial convention learning skipped for ${source.repository}:`, err instanceof Error ? err.message : err);
         });
       }
@@ -342,14 +361,15 @@ function startServer(): void {
 
   app.get("/api/github/rules", async (req, res) => {
     const installationId = Number(req.query.installation_id);
-    const repository = parseRepositoryName(req.query.repository);
-    if (!Number.isInteger(installationId) || installationId <= 0 || !repository) {
+    const requestedRepository = parseRepositoryName(req.query.repository);
+    if (!Number.isInteger(installationId) || installationId <= 0 || !requestedRepository) {
       res.status(400).json({ error: "installation_id and repository are required." });
       return;
     }
+    if (!requireInstallationAccess(req, res, installationId)) return;
 
     try {
-      await ensureInstalledRepository(installationId, repository);
+      const repository = await resolveInstalledRepository(installationId, requestedRepository);
       const configuration = await loadConventionConfiguration(installationId, repository);
       const targetScope = repositoryScope(installationId, repository);
       const targetRules = await listConventions(targetScope);
@@ -372,18 +392,19 @@ function startServer(): void {
 
   app.post("/api/github/rules", async (req, res) => {
     const installationId = Number(req.body?.installationId);
-    const repository = parseRepositoryName(req.body?.repository);
+    const requestedRepository = parseRepositoryName(req.body?.repository);
     const severity = req.body?.severity;
     const rule = typeof req.body?.rule === "string" ? req.body.rule.trim() : "";
     const rationale = typeof req.body?.rationale === "string" ? req.body.rationale.trim() : "";
-    if (!Number.isInteger(installationId) || installationId <= 0 || !repository || !rule || !rationale ||
+    if (!Number.isInteger(installationId) || installationId <= 0 || !requestedRepository || !rule || !rationale ||
       !["bug", "security", "style", "suggestion", "performance"].includes(severity)) {
       res.status(400).json({ error: "repository, rule, rationale, and a valid severity are required." });
       return;
     }
+    if (!requireInstallationAccess(req, res, installationId)) return;
 
     try {
-      await ensureInstalledRepository(installationId, repository);
+      const repository = await resolveInstalledRepository(installationId, requestedRepository);
       const created = await addCustomConvention(repositoryScope(installationId, repository), {
         rule,
         rationale,
@@ -398,15 +419,16 @@ function startServer(): void {
 
   app.patch("/api/github/rules", async (req, res) => {
     const installationId = Number(req.body?.installationId);
-    const repository = parseRepositoryName(req.body?.repository);
+    const requestedRepository = parseRepositoryName(req.body?.repository);
     const id = typeof req.body?.id === "string" ? req.body.id : "";
-    if (!Number.isInteger(installationId) || installationId <= 0 || !repository || !id) {
+    if (!Number.isInteger(installationId) || installationId <= 0 || !requestedRepository || !id) {
       res.status(400).json({ error: "installationId, repository, and rule id are required." });
       return;
     }
+    if (!requireInstallationAccess(req, res, installationId)) return;
 
     try {
-      await ensureInstalledRepository(installationId, repository);
+      const repository = await resolveInstalledRepository(installationId, requestedRepository);
       const update = {
         ...(typeof req.body?.rule === "string" ? { rule: req.body.rule.trim() } : {}),
         ...(typeof req.body?.rationale === "string" ? { rationale: req.body.rationale.trim() } : {}),
@@ -428,15 +450,16 @@ function startServer(): void {
 
   app.delete("/api/github/rules", async (req, res) => {
     const installationId = Number(req.body?.installationId);
-    const repository = parseRepositoryName(req.body?.repository);
+    const requestedRepository = parseRepositoryName(req.body?.repository);
     const id = typeof req.body?.id === "string" ? req.body.id : "";
-    if (!Number.isInteger(installationId) || installationId <= 0 || !repository || !id) {
+    if (!Number.isInteger(installationId) || installationId <= 0 || !requestedRepository || !id) {
       res.status(400).json({ error: "installationId, repository, and rule id are required." });
       return;
     }
+    if (!requireInstallationAccess(req, res, installationId)) return;
 
     try {
-      await ensureInstalledRepository(installationId, repository);
+      const repository = await resolveInstalledRepository(installationId, requestedRepository);
       const deleted = await deleteCustomConvention(repositoryScope(installationId, repository), id);
       if (!deleted) {
         res.status(404).json({ error: "Custom rule not found." });
@@ -449,7 +472,7 @@ function startServer(): void {
   });
 
   app.get("/api/health", (_req, res) => {
-    res.json({ ok: true, webhook: Boolean(config.githubWebhookSecret) });
+    res.json({ ok: true, webhook: Boolean(config.githubWebhookSecret), auth: isAuthConfigured() });
   });
 
   const frontendDist = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "frontend", "dist");
@@ -462,7 +485,7 @@ function startServer(): void {
 
   const port = Number(process.env.PORT) || 3000;
   app.listen(port, () => {
-    console.log(`Code Review Copilot running on http://localhost:${port}`);
+    console.log(`PRHawk running on http://localhost:${port}`);
   });
 }
 

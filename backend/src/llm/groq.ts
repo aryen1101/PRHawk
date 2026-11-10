@@ -79,6 +79,7 @@ export async function complete<T extends z.ZodTypeAny>(
         }
       } catch (err) {
         lastDetail = err instanceof Error ? err.message : String(err);
+        if (isNonRetryable(err)) break;
       }
     }
 
@@ -86,6 +87,17 @@ export async function complete<T extends z.ZodTypeAny>(
   }
 
   throw new Error(`All configured AI providers failed. ${errors.join(" | ")}`);
+}
+
+/**
+ * Client errors such as "context too long" (400/413) or bad credentials
+ * (401/403/404) fail the same way on every retry, so move to the next provider.
+ * Timeouts (408), conflicts (409), and rate limits (429) are still retried.
+ */
+function isNonRetryable(err: unknown): boolean {
+  const status = (err as { status?: number })?.status;
+  if (typeof status !== "number" || status < 400 || status >= 500) return false;
+  return ![408, 409, 429].includes(status);
 }
 
 function extractJson(text: string): string {

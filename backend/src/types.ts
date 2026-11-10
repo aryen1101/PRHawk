@@ -25,5 +25,12 @@ export interface FileContext {
     path : string,
     patch : string,
     addedLines : number[],
-    content : string
+    /** Line-numbered code around the changed lines at the PR head; empty if omitted. */
+    excerpt : string
+}
+
+/** A changed file that was skipped or only partly reviewed, with the reason. */
+export interface SkippedFile {
+    path : string,
+    reason : string
 }

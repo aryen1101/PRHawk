@@ -8,7 +8,11 @@ export type InstallationRepository = {
   private: boolean;
 };
 
-export async function isPublicRepository(repository: string): Promise<boolean> {
+/**
+ * Returns the repository's canonical "owner/name" (GitHub's own casing) if it
+ * is public, or null if it is private or does not exist.
+ */
+export async function getPublicRepositoryName(repository: string): Promise<string | null> {
   const response = await fetch(`${GITHUB_API}/repos/${repository}`, {
     headers: {
       Accept: "application/vnd.github+json",
@@ -16,13 +20,13 @@ export async function isPublicRepository(repository: string): Promise<boolean> {
     },
   });
 
-  if (response.status === 404) return false;
+  if (response.status === 404) return null;
   if (!response.ok) {
     throw new Error(`GitHub public repository check failed (HTTP ${response.status}).`);
   }
 
-  const data = await response.json() as { private?: boolean };
-  return data.private === false;
+  const data = await response.json() as { private?: boolean; full_name?: string };
+  return data.private === false ? data.full_name ?? repository : null;
 }
 
 function base64Url(value: string | Buffer): string {
@@ -78,6 +82,24 @@ export async function getInstallationToken(installationId: number): Promise<stri
   const data = await response.json() as { token?: string };
   if (!data.token) throw new Error("GitHub did not return an installation token.");
   return data.token;
+}
+
+/** The GitHub App's installation ID for a repository, or null if it is not installed there. */
+export async function getRepositoryInstallationId(repository: string): Promise<number | null> {
+  const response = await fetch(`${GITHUB_API}/repos/${repository}/installation`, {
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${createAppJwt()}`,
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+  });
+
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(`GitHub App installation lookup for ${repository} failed (HTTP ${response.status}).`);
+  }
+  const data = await response.json() as { id?: number };
+  return data.id ?? null;
 }
 
 export async function getInstallationRepositories(installationId: number): Promise<InstallationRepository[]> {
