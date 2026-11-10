@@ -83,7 +83,7 @@ cd ../frontend
 npm install
 ```
 
-Create `backend/.env.local` from `backend/.env.example` and configure:
+Create `backend/.env` from `backend/.env.example` and configure:
 
 ```env
 MONGODB_URL=mongodb+srv://user:password@cluster.mongodb.net/
@@ -154,7 +154,7 @@ cd frontend
 npm.cmd run dev
 ```
 
-Open `http://localhost:5173`. Set `VITE_GITHUB_APP_INSTALL_URL` in `frontend/.env.local` or the deployment environment to the App installation URL:
+Open `http://localhost:5173`. Set `VITE_GITHUB_APP_INSTALL_URL` in `frontend/.env` or the deployment environment to the App installation URL:
 
 ```env
 VITE_GITHUB_APP_INSTALL_URL=https://github.com/apps/YOUR_APP_SLUG/installations/new
@@ -213,7 +213,7 @@ npx.cmd tsc --noEmit
 
 ## Security
 
-- Keep `backend/.env.local` out of Git.
+- Keep `backend/.env` out of Git.
 - Never commit a GitHub App private key or webhook secret.
 - Store AI keys and MongoDB credentials only in deployment secrets.
 - Verify every webhook using `X-Hub-Signature-256`.

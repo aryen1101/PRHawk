@@ -4,18 +4,7 @@ import { config } from "../config.js";
 
 type Provider = { name: string; model: string; client: OpenAI };
 
-function getProviders(customKey?: string, customBaseURL?: string): Provider[] {
-  if (customKey) {
-    return [{
-      name: "OpenRouter custom key",
-      model: config.openrouterModel,
-      client: new OpenAI({
-        apiKey: customKey,
-        baseURL: customBaseURL || "https://openrouter.ai/api/v1",
-      }),
-    }];
-  }
-
+function getProviders(): Provider[] {
   const providers: Provider[] = [];
   if (config.openaiApiKey()) {
     providers.push({
@@ -47,14 +36,12 @@ export async function complete<T extends z.ZodTypeAny>(
   system: string,
   user: string,
   schema: T,
-  customKey?: string,
-  customBaseURL?: string,
   maxCompletionTokens = 8000,
 ): Promise<z.infer<T>> {
   const shape = JSON.stringify(z.toJSONSchema(schema));
   const errors: string[] = [];
 
-  for (const provider of getProviders(customKey, customBaseURL)) {
+  for (const provider of getProviders()) {
     let lastDetail = "";
 
     for (let attempt = 1; attempt <= 3; attempt++) {

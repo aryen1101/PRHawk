@@ -17,8 +17,6 @@ export async function learnConventions(
   owner: string,
   repo: string,
   customToken?: string,
-  customLlmKey?: string,
-  customLlmBase?: string,
   anonymous = false,
 ): Promise<ConventionRule[]> {
   const client = getOctokitClient(customToken, anonymous);
@@ -60,8 +58,6 @@ export async function learnConventions(
     buildConventionsSystemPrompt(),
     buildConventionsUserPrompt(samples),
     conventionsSchema,
-    customLlmKey,
-    customLlmBase,
     3000,
   );
 

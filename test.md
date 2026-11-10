@@ -119,12 +119,12 @@ GitHub does not store the private key for later download. Never commit or share 
 
 The App must be installed on this exact repository to receive its pull request events.
 
-## 6. Configure `backend/.env.local`
+## 6. Configure `backend/.env`
 
 Edit:
 
 ```text
-C:\Users\aryen\OneDrive\Documents\Desktop\Learning\PRHawk\backend\.env.local
+C:\Users\aryen\OneDrive\Documents\Desktop\Learning\PRHawk\backend\.env
 ```
 
 Add the App settings:
@@ -150,7 +150,7 @@ GROQ_MODEL=openai/gpt-oss-120b
 
 OpenAI is tried first and Groq is used as the fallback. A GitHub PAT is not required when the App credentials are configured.
 
-Restart the backend after editing `.env.local`:
+Restart the backend after editing `.env`:
 
 ```powershell
 cd C:\Users\aryen\OneDrive\Documents\Desktop\Learning\PRHawk\backend
@@ -292,4 +292,5 @@ Check the App's **Advanced → Recent Deliveries** page:
 
 ## Security
 
-Never commit `backend/.env`, `backend/.env.local`, the App `.pem` file, webhook secret, API keys, or MongoDB password. Rotate any credential that is exposed.
+Never commit `backend/.env`, the App `.pem` file, webhook secret, API keys, or MongoDB password. Rotate any credential that is exposed.
+

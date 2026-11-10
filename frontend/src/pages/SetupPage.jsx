@@ -1,5 +1,5 @@
 import { AlertTriangle, ArrowRight, CheckCircle, LoaderCircle, Pencil, Plus, Trash2, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 const installUrl = import.meta.env.VITE_GITHUB_APP_INSTALL_URL || "https://github.com/apps/prhawk-webhook-tester/installations/new";
 const apiBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
@@ -30,7 +30,7 @@ export default function SetupPage() {
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
 
-  async function loadRepository(repository) {
+  const loadRepository = useCallback(async (repository) => {
     if (!installationId || !repository) return;
     setError("");
     try {
@@ -47,7 +47,7 @@ export default function SetupPage() {
     } catch (err) {
       setError(err.message);
     }
-  }
+  }, [installationId]);
 
   useEffect(() => {
     if (!installationId) return;
@@ -61,7 +61,7 @@ export default function SetupPage() {
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
-  }, [installationId]);
+  }, [installationId, loadRepository]);
 
   function addSource(event) {
     event.preventDefault();

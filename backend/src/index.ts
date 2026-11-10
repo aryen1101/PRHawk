@@ -140,8 +140,6 @@ async function processConventionLearning(
     owner,
     repo,
     source.visibility === "public" ? undefined : installationToken,
-    undefined,
-    undefined,
     source.visibility === "public",
   );
   console.log(`Learned ${rules.length} ${source.visibility} convention(s) for ${source.repository}.`);
