@@ -49,6 +49,7 @@ export async function complete<T extends z.ZodTypeAny>(
   schema: T,
   customKey?: string,
   customBaseURL?: string,
+  maxCompletionTokens = 8000,
 ): Promise<z.infer<T>> {
   const shape = JSON.stringify(z.toJSONSchema(schema));
   const errors: string[] = [];
@@ -60,7 +61,7 @@ export async function complete<T extends z.ZodTypeAny>(
       try {
         const response = await provider.client.chat.completions.create({
           model: provider.model,
-          max_completion_tokens: 8000,
+          max_completion_tokens: maxCompletionTokens,
           response_format: { type: "json_object" },
           messages: [
             {

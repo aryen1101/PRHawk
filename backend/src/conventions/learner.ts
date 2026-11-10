@@ -9,7 +9,8 @@ import {
   buildConventionsUserPrompt,
 } from "../review/prompts.js";
 
-const MAX_SAMPLE_CHARS = 5000;
+const MAX_SAMPLE_CHARS_PER_PR = 2500;
+const MAX_TOTAL_SAMPLE_CHARS = 12000;
 
 export async function learnConventions(
   userId: string,
@@ -37,6 +38,7 @@ export async function learnConventions(
   }
 
   const samples: string[] = [];
+  let totalSampleChars = 0;
   for (const p of merged) {
     const files = await client.paginate(client.pulls.listFiles, {
       owner,
@@ -48,9 +50,11 @@ export async function learnConventions(
       .filter((f) => f.patch)
       .map((f) => `--- ${f.filename} ---\n${f.patch}`)
       .join("\n\n");
-    samples.push(
-      `PR #${p.number}: ${p.title}\n${patches}`.slice(0, MAX_SAMPLE_CHARS),
-    );
+    const remaining = MAX_TOTAL_SAMPLE_CHARS - totalSampleChars;
+    if (remaining <= 0) break;
+    const sample = `PR #${p.number}: ${p.title}\n${patches}`.slice(0, Math.min(MAX_SAMPLE_CHARS_PER_PR, remaining));
+    samples.push(sample);
+    totalSampleChars += sample.length;
   }
   const result = await complete(
     buildConventionsSystemPrompt(),
@@ -58,6 +62,7 @@ export async function learnConventions(
     conventionsSchema,
     customLlmKey,
     customLlmBase,
+    3000,
   );
 
   const rules = result.rules ?? [];
