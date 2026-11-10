@@ -61,7 +61,7 @@ PRHawk/
 │   └── src/
 │       ├── pages/LandingPage.jsx    # Public install page
 │       └── App.jsx
-└── test.md                          # Complete webhook test guide
+└── architecture.md                  # System design and flows
 ```
 
 ## Local setup
@@ -120,21 +120,21 @@ https://prhawk-1.onrender.com/api/github/webhook
 
 Install the App on the repositories that should receive automatic reviews.
 
-Set the GitHub App **Setup URL** to the deployed setup route:
+Enable **Request user authorization (OAuth) during installation** and set the GitHub App **Callback URL** to:
 
 ```text
-https://pr-hawk.vercel.app/setup
+https://pr-hawk.vercel.app/api/auth/github/callback
 ```
 
-After installation, GitHub redirects the user to this page. The user selects the repository to review, adds or removes multiple convention sources, and manages custom rules. Private sources require the App to be installed. Public sources can be enabled explicitly and are read anonymously.
+Generate a client secret on the App settings page and set `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and `SESSION_SECRET` (32+ random characters) on the backend. Leave `VITE_API_BASE_URL` empty on Vercel; `frontend/vercel.json` proxies `/api` to Render.
+
+After installation, GitHub asks the user to authorize PRHawk, signs them in, and redirects to `/setup`. Only GitHub users who can access an installation can change its settings. The user selects the repository to review, adds or removes multiple convention sources, and manages custom rules. Private sources require the App to be installed. Public sources can be enabled explicitly and are read anonymously.
 
 For local testing, expose port `3000` with an HTTPS tunnel such as ngrok, then use:
 
 ```text
 https://YOUR_TUNNEL_HOST/api/github/webhook
 ```
-
-The complete setup and test sequence is in [test.md](test.md).
 
 ## Run locally
 
@@ -183,7 +183,15 @@ Learn conventions from merged pull requests:
 npm.cmd run learn -- owner/repository
 ```
 
-Learned conventions are stored in MongoDB and are scoped to the GitHub installation/repository that uses them. The CLI remains available for local or administrative learning workflows.
+The CLI reads and writes the same rules as webhook reviews:
+
+| Repository | Credentials | Rules scope |
+|---|---|---|
+| PRHawk App installed | App installation token (reviews are posted as the App) | `github-installation:<id>:owner/repo`, plus configured sources and custom rules |
+| Not installed, public | `GITHUB_TOKEN`, or anonymous (dry runs and learning only) | `github-public:owner/repo` |
+| Not installed, private | `GITHUB_TOKEN` | `github-repository:owner/repo` |
+
+`npm run learn` always relearns, regardless of when the repository was last learned.
 
 ## API endpoints
 
