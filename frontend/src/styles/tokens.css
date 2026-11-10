@@ -1,0 +1,65 @@
+:root {
+  color-scheme: dark;
+  --space-3xs: 2px; --space-2xs: 4px; --space-xs: 8px; --space-sm: 12px; --space-md: 16px; --space-lg: 24px; --space-xl: 40px; --space-2xl: 64px; --space-3xl: 96px; --space-4xl: 144px;
+  --text-xs: 0.8125rem; --text-sm: 0.875rem; --text-md: 1rem; --text-lg: 1.25rem; --text-xl: 1.5625rem; --text-2xl: 1.953rem; --text-3xl: 2.441rem;
+  --text-display-s: clamp(2.25rem, 4vw + 0.5rem, 3.75rem); --text-display: clamp(2.75rem, 4.2vw + 1rem, 4.75rem);
+  --text-section: clamp(2rem, 2.5vw + 1rem, 3.25rem); --text-title: clamp(1.25rem, 0.75vw + 0.875rem, 1.5rem); --text-lead: clamp(1.125rem, 0.35vw + 1rem, 1.3125rem);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1); --ease-in: cubic-bezier(0.7, 0, 0.84, 0); --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-micro: 120ms; --dur-short: 220ms; --dur-long: 420ms;
+  --container: 1440px; --gutter: 64px; --gap-columns: 32px; --section-gap-s: 120px; --section-gap: 144px; --section-gap-l: 176px;
+  --z-base: 1; --z-raised: 10; --z-dropdown: 100; --z-sticky: 200; --z-sticky-nav: 300; --z-modal: 400; --z-toast: 500; --z-tooltip: 600;
+
+  /* Paper: near-black tinted toward the logo's violet (hue 292). */
+  --color-paper: oklch(14.5% 0.012 292);
+  --color-paper-2: oklch(18% 0.014 292);
+  --color-paper-3: oklch(22% 0.016 292);
+  --color-ink: oklch(95.5% 0.008 292);
+  --color-ink-2: oklch(82% 0.012 292);
+  --color-muted: oklch(68% 0.016 292);
+  --color-rule: oklch(29% 0.016 292);
+  --color-rule-strong: oklch(38% 0.018 292);
+
+  /* One accent: the logo's violet. */
+  --color-accent: oklch(55% 0.2 292);
+  --color-accent-hover: oklch(50% 0.2 292);
+  --color-accent-ink: oklch(98.5% 0.006 292);
+  --color-accent-text: oklch(78% 0.13 292);
+  --color-accent-wash: oklch(58% 0.2 292 / 0.14);
+  --color-focus: oklch(72% 0.19 292);
+
+  /* States. */
+  --color-error: oklch(72% 0.15 25);
+  --color-error-wash: oklch(62% 0.17 25 / 0.14);
+  --color-success: oklch(76% 0.13 152);
+  --color-success-wash: oklch(66% 0.13 152 / 0.14);
+  --color-warning: oklch(83% 0.13 85);
+  --color-warning-wash: oklch(78% 0.13 85 / 0.12);
+
+  /* Review severities (PRHawk's five tags). */
+  --color-sev-security: oklch(72% 0.15 25);
+  --color-sev-bug: oklch(78% 0.13 60);
+  --color-sev-performance: oklch(84% 0.12 90);
+  --color-sev-style: oklch(76% 0.09 255);
+  --color-sev-suggestion: oklch(78% 0.1 292);
+
+  /* Diff lines. */
+  --color-diff-add: oklch(66% 0.13 152 / 0.12);
+  --color-diff-add-mark: oklch(76% 0.13 152);
+  --color-comment-line: oklch(58% 0.2 292 / 0.1);
+
+  /* Code tokens. */
+  --color-code-keyword: oklch(76% 0.12 292);
+  --color-code-string: oklch(80% 0.1 150);
+  --color-code-comment: oklch(60% 0.016 292);
+  --color-code-number: oklch(82% 0.1 60);
+  --color-code-fn: oklch(80% 0.08 240);
+
+  --font-display: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-outlier: "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --display-weight: 700;
+
+  --radius-card: 12px; --radius-control: 8px; --radius-inner: 4px; --radius-pill: 999px; --rule-hair: 1px;
+  --shadow-card: 0 0 0 1px oklch(30% 0.016 292 / 0.6);
+  --tracking-display: -0.035em;
+}
