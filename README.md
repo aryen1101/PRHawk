@@ -26,7 +26,7 @@ Summary and inline GitHub comments
 
 There is no email/password account system and no manual PR URL form. Users install the GitHub App once, select repositories, and reviews happen automatically.
 
-The CLI remains available for maintainers who want local dry runs or administrative workflows. Normal convention learning happens automatically after merged pull requests.
+The CLI remains available for maintainers who want local dry runs or administrative workflows. Normal convention learning happens automatically when the App is installed and after merged pull requests.
 
 ## Features
 
@@ -35,7 +35,9 @@ The CLI remains available for maintainers who want local dry runs or administrat
 - Quality score and merge recommendation
 - Review size limits for large pull requests, with skipped files listed in the summary
 - A pull request comment when a review fails
-- Automatic convention learning after merged pull requests, refreshed at most once a day per source
+- Automatic convention learning on install and after merged pull requests; public sources are refreshed daily on a schedule, skipping the model when nothing new has merged
+- Learned rules can be disabled per repository without affecting other users of the same source
+- Safe to run several backend instances: a MongoDB lock keeps each repository to one learning run at a time
 - Optional convention learning from public repositories
 - Multiple convention sources and custom rule management
 - GitHub sign-in for the settings page; users only manage installations they can access
@@ -126,7 +128,7 @@ Set these repository permissions:
 - Pull requests: Read and write
 - Metadata: Read-only
 
-Enable the **Pull request** webhook event and configure the production webhook URL:
+Enable the **Pull request** webhook event and configure the production webhook URL. GitHub sends installation events to every App without a subscription; PRHawk uses them to learn repositories as soon as they are installed.
 
 ```text
 https://prhawk-1.onrender.com/api/github/webhook
@@ -239,13 +241,14 @@ POST   /api/github/setup            Save target and optional convention-source r
 GET    /api/github/rules            View target, source and effective rules
 POST   /api/github/rules            Add a custom target rule
 PATCH  /api/github/rules            Update or enable/disable a custom rule
+PATCH  /api/github/rules/learned    Disable or re-enable a learned rule for this repository
 DELETE /api/github/rules            Delete a custom target rule
 GET    /api/health                  Service, webhook-secret and sign-in configuration status
 ```
 
 Every `/api/github/setup` and `/api/github/rules` request needs a signed-in session whose GitHub user can access the requested installation (`401` without a session, `403` for another installation).
 
-The webhook returns `202 Accepted` after a valid event is accepted and runs review or convention learning in the background. Pull requests opened, reopened, or updated are reviewed; merged pull requests trigger convention learning.
+The webhook returns `202 Accepted` after a valid event is accepted and runs review or convention learning in the background. Pull requests opened, reopened, or updated are reviewed; merged pull requests and newly installed repositories trigger convention learning.
 
 ## Verification
 

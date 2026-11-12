@@ -11,6 +11,9 @@ import { postReview, postReviewFailure } from "./github/reviewPublishers.js";
 import { reviewDiff } from "./review/reviewer.js";
 import {
   addCustomConvention,
+  applyRuleOverrides,
+  ruleKey,
+  setLearnedRuleDisabled,
   deleteCustomConvention,
   loadConventionConfiguration,
   listConventions,
@@ -18,7 +21,7 @@ import {
   updateCustomConvention,
 } from "./conventions/store.js";
 import type { ConventionSource } from "./conventions/store.js";
-import { learnConventionsIfStale } from "./conventions/learner.js";
+import { learnConventionsIfStale, startSourceRefresh } from "./conventions/learner.js";
 import { loadReviewConventions, normalizeConventionSource, repositoryScope } from "./conventions/scopes.js";
 import { config } from "./config.js";
 import { initDb } from "./db/index.js";
@@ -41,6 +44,22 @@ type PullRequestWebhook = {
     head?: { sha?: string };
   };
 };
+
+type InstallationWebhook = {
+  action?: string;
+  installation?: { id?: number };
+  /** Repositories in a new installation ("installation" event, action "created"). */
+  repositories?: { full_name?: string }[];
+  /** Repositories added to an existing installation ("installation_repositories", action "added"). */
+  repositories_added?: { full_name?: string }[];
+};
+
+/**
+ * Repositories learned right after install. Each run is a model call, so an
+ * installation on many repositories learns the first ones now and the rest
+ * when they are saved in setup or their first pull request merges.
+ */
+const MAX_REPOSITORIES_LEARNED_ON_INSTALL = 10;
 
 async function getWebhookToken(installationId: number | undefined): Promise<string> {
   return config.githubAppId && config.githubAppPrivateKey
@@ -145,6 +164,8 @@ async function processConventionLearning(
   );
   if (outcome.status === "skipped") {
     console.log(`Convention learning skipped for ${source.repository}: ${outcome.reason}.`);
+  } else if (outcome.status === "unchanged") {
+    console.log(`No new merged pull requests in ${source.repository}; kept ${outcome.rules.length} convention(s).`);
   } else {
     console.log(`Learned ${outcome.rules.length} ${source.visibility} convention(s) for ${source.repository}.`);
   }
@@ -176,6 +197,37 @@ async function processMergedPullRequestWebhook(payload: PullRequestWebhook): Pro
       } catch (err) {
         console.error(`Convention learning skipped for ${source.repository}:`, err instanceof Error ? err.message : err);
       }
+    }
+  }
+}
+
+/**
+ * Learns each repository added to an installation, so reviews have the team's
+ * rules before setup is saved or the first pull request merges.
+ */
+async function processInstallationWebhook(event: string, payload: InstallationWebhook): Promise<void> {
+  const installationId = payload.installation?.id;
+  const added =
+    event === "installation" && payload.action === "created" ? payload.repositories :
+    event === "installation_repositories" && payload.action === "added" ? payload.repositories_added :
+    undefined;
+  const repositories = (added ?? []).map((item) => item.full_name).filter((name): name is string => Boolean(name));
+  if (!installationId || repositories.length === 0) return;
+
+  const toLearn = repositories.slice(0, MAX_REPOSITORIES_LEARNED_ON_INSTALL);
+  if (repositories.length > toLearn.length) {
+    console.log(
+      `Installation ${installationId} added ${repositories.length} repositories; learning the first ` +
+        `${toLearn.length} now, the rest on setup or their first merge.`,
+    );
+  }
+  const token = await getInstallationToken(installationId);
+  // One at a time: each run makes a model call.
+  for (const repository of toLearn) {
+    try {
+      await processConventionLearning(installationId, { repository, visibility: "installation" }, token, SOURCE_MAX_AGE_MS);
+    } catch (err) {
+      console.error(`Install-time learning skipped for ${repository}:`, err instanceof Error ? err.message : err);
     }
   }
 }
@@ -213,18 +265,29 @@ function startServer(): void {
       return;
     }
 
-    if (req.header("x-github-event") !== "pull_request") {
+    const event = req.header("x-github-event") ?? "";
+    if (!["pull_request", "installation", "installation_repositories"].includes(event)) {
       res.sendStatus(204);
       return;
     }
 
-    let payload: PullRequestWebhook;
+    let parsed: unknown;
     try {
-      payload = JSON.parse(rawBody.toString("utf8")) as PullRequestWebhook;
+      parsed = JSON.parse(rawBody.toString("utf8"));
     } catch {
       res.status(400).json({ error: "Invalid webhook JSON payload." });
       return;
     }
+
+    if (event !== "pull_request") {
+      res.status(202).json({ accepted: true, task: "install-learning" });
+      void processInstallationWebhook(event, parsed as InstallationWebhook).catch((err) => {
+        console.error("Install-time learning failed:", err instanceof Error ? err.message : err);
+      });
+      return;
+    }
+
+    const payload = parsed as PullRequestWebhook;
 
     if (payload.action === "closed" && payload.pull_request?.merged === true) {
       res.status(202).json({ accepted: true, task: "convention-learning" });
@@ -373,11 +436,12 @@ function startServer(): void {
       const repository = await resolveInstalledRepository(installationId, requestedRepository);
       const configuration = await loadConventionConfiguration(installationId, repository);
       const targetScope = repositoryScope(installationId, repository);
-      const targetRules = await listConventions(targetScope);
+      const disabledRules = configuration?.disabledRules;
+      const targetRules = applyRuleOverrides(await listConventions(targetScope), disabledRules);
       const sources = await Promise.all((configuration?.conventionSources ?? []).map(async (rawSource) => {
         const source = normalizeConventionSource(rawSource);
         const scope = repositoryScope(installationId, source.repository, source.visibility);
-        return { ...source, scope, rules: await listConventions(scope) };
+        return { ...source, scope, rules: applyRuleOverrides(await listConventions(scope), disabledRules) };
       }));
 
       res.json({
@@ -415,6 +479,45 @@ function startServer(): void {
       res.status(201).json(created);
     } catch (err) {
       res.status(403).json({ error: err instanceof Error ? err.message : "Could not add custom rule." });
+    }
+  });
+
+  /**
+   * Turns a learned rule (the target's own or a source's) off or on for this
+   * target repository only. Shared learned rules are not modified.
+   */
+  app.patch("/api/github/rules/learned", async (req, res) => {
+    const installationId = Number(req.body?.installationId);
+    const requestedRepository = parseRepositoryName(req.body?.repository);
+    const rule = typeof req.body?.rule === "string" ? req.body.rule : "";
+    const enabled = req.body?.enabled;
+    if (!Number.isInteger(installationId) || installationId <= 0 || !requestedRepository || !rule.trim() ||
+      typeof enabled !== "boolean") {
+      res.status(400).json({ error: "installationId, repository, rule, and enabled are required." });
+      return;
+    }
+    if (!requireInstallationAccess(req, res, installationId)) return;
+
+    try {
+      const repository = await resolveInstalledRepository(installationId, requestedRepository);
+      const configuration = await loadConventionConfiguration(installationId, repository);
+      const scopes = [
+        repositoryScope(installationId, repository),
+        ...(configuration?.conventionSources ?? []).map((rawSource) => {
+          const source = normalizeConventionSource(rawSource);
+          return repositoryScope(installationId, source.repository, source.visibility);
+        }),
+      ];
+      const learned = (await Promise.all(scopes.map(listConventions))).flat().filter((item) => item.kind !== "custom");
+      const key = ruleKey({ rule });
+      if (!learned.some((item) => ruleKey(item) === key)) {
+        res.status(404).json({ error: "Learned rule not found for this repository or its sources." });
+        return;
+      }
+      await setLearnedRuleDisabled(installationId, repository, { rule }, !enabled);
+      res.json({ rule, enabled });
+    } catch (err) {
+      res.status(403).json({ error: err instanceof Error ? err.message : "Could not update learned rule." });
     }
   });
 
@@ -493,7 +596,10 @@ function startServer(): void {
 // Connect and create indexes before accepting traffic, so a bad MONGODB_URL
 // or duplicate data fails the deploy instead of the first webhook.
 initDb()
-  .then(startServer)
+  .then(() => {
+    startServer();
+    startSourceRefresh(SOURCE_MAX_AGE_MS);
+  })
   .catch((err) => {
     console.error("Database setup failed:", err instanceof Error ? err.message : err);
     process.exit(1);

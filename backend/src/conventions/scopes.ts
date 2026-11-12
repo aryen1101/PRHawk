@@ -1,4 +1,4 @@
-import { loadConventionConfiguration, loadConventions } from "./store.js";
+import { applyRuleOverrides, loadConventionConfiguration, loadConventions } from "./store.js";
 import type { ConventionSource } from "./store.js";
 import type { ConventionRule } from "../types.js";
 
@@ -28,6 +28,7 @@ export function normalizeConventionSource(source: ConventionSource | string): Co
 /**
  * Rules used when reviewing a repository: its own enabled learned and custom
  * rules plus enabled rules from its configured sources, de-duplicated.
+ * Learned rules the repository has turned off are left out.
  */
 export async function loadReviewConventions(
   installationId: number | undefined,
@@ -45,8 +46,10 @@ export async function loadReviewConventions(
     }),
   );
 
+  const rules = applyRuleOverrides([...ownRules, ...sourceRules.flat()], configuration?.disabledRules)
+    .filter((rule) => rule.enabled !== false);
   const unique = new Map<string, ConventionRule>();
-  for (const rule of [...ownRules, ...sourceRules.flat()]) {
+  for (const rule of rules) {
     unique.set(`${rule.severity}:${rule.rule}`, rule);
   }
   return [...unique.values()];

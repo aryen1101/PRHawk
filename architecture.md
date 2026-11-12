@@ -63,6 +63,7 @@ Important endpoints:
 | `GET` | `/api/github/rules` | Return target rules, source rules, and effective rules |
 | `POST` | `/api/github/rules` | Add a custom rule for a target repository |
 | `PATCH` | `/api/github/rules` | Edit or enable/disable a custom rule |
+| `PATCH` | `/api/github/rules/learned` | Disable or re-enable a learned rule (own or from a source) for this repository only |
 | `DELETE` | `/api/github/rules` | Delete a custom rule |
 | `GET` | `/api/auth/github/login` | Start GitHub user sign-in (sets an OAuth `state` cookie) |
 | `GET` | `/api/auth/github/callback` | GitHub sign-in/installation callback; creates the session cookie |
@@ -129,7 +130,8 @@ Collections:
 |---|---|
 | `conventions` | Learned rules for an installation repository or a public source repository |
 | `custom_conventions` | User-authored rules scoped to a target repository |
-| `convention_configurations` | Target repository and its selected convention sources |
+| `convention_configurations` | Target repository, its selected convention sources, and learned rules it has disabled (`disabledRules`) |
+| `locks` | Short-lived learning locks shared by all backend instances (TTL index on `expiresAt`) |
 
 #### Indexes and startup
 
@@ -228,15 +230,23 @@ A review only reads rules that are already saved in MongoDB (up to `REVIEW_MAX_C
 
 ## 5. Convention learning flow
 
-Learning runs after setup is saved and after a pull request is merged, but only for scopes that are stale:
+Learning runs when the App is installed on a repository, after setup is saved, after a pull request is merged, and on an hourly schedule for public sources, but only for scopes that are stale:
 
 | Trigger | Target repository | Each convention source |
 |---|---|---|
 | Target PR merged | Relearned unless learned in the last 10 minutes | Relearned only if older than 24 hours |
 | Setup saved | Relearned only if older than 24 hours | Relearned only if older than 24 hours |
+| App installed, or repositories added to an installation | Learned if older than 24 hours (first 10 repositories per event) | — |
+| Hourly check | — | Public sources older than 24 hours (at most 3 full runs per check) |
 | CLI `npm run learn` | Always relearned | — |
 
-Each `conventions` document records `learnedAt` (last successful run) and `attemptedAt` (last start). A failed or empty run blocks retries of that scope for one hour (or the scope's own window, if shorter). Concurrent triggers for the same scope share one in-process run, so a public source such as `github-public:redis/redis` is learned at most once per 24 hours regardless of how many installations use it. Installed sources are scoped per installation and are learned once per installation.
+Each `conventions` document records `learnedAt` (last successful run) and `attemptedAt` (last start). A failed or empty run blocks retries of that scope for one hour (or the scope's own window, if shorter). Concurrent triggers for the same scope share one in-process run, and a MongoDB lock (`locks` collection, see below) stops other backend instances from learning the same scope at the same time, so a public source such as `github-public:redis/redis` is learned at most once per 24 hours regardless of how many installations or instances use it. Installed sources are scoped per installation and are learned once per installation.
+
+Each successful run stores the merged PR numbers it sampled (`sampledPullNumbers`). When a run through the staleness check finds the same set of merged PRs as last time, nothing new has merged, so it skips the model call, keeps the saved rules and only updates `learnedAt`. This makes the hourly refresh cheap for quiet repositories: one GitHub request instead of about 11 plus a model call. The CLI always runs the model.
+
+#### Learning lock
+
+`acquireLock` in `db/index.ts` inserts a document `{ _id: "learning:<scope>", owner, expiresAt }` into `locks`. The unique `_id` means only one instance can insert it; the others skip with "another instance is learning it". The staleness check runs after the lock is taken, so an instance that waited sees a run another instance just finished. The lock lasts 10 minutes, longer than a normal run. If an instance crashes while holding it, the lock counts as free once `expiresAt` passes, and a TTL index deletes it shortly after. Release deletes the lock only if the same owner still holds it.
 
 A run that returns no rules keeps the existing rules. When a run succeeds, rules whose text matches an existing rule (case- and whitespace-insensitive) keep their `id` and `enabled` flag, so the rules list stays stable across runs.
 
@@ -289,13 +299,12 @@ Public sources use one shared scope, `github-public:<owner>/<repo>`, with no ins
 - a pull request merges in any target repository that lists it as a source;
 - `npm run learn -- <owner>/<repo>` (ignores the window).
 
-PRHawk is not installed on public sources, so GitHub sends no webhooks for their pushes or merges; new upstream activity is picked up only at the next trigger after the window. Direct pushes without a pull request are never learned from, in any repository.
+PRHawk is not installed on public sources, so GitHub sends no webhooks for their pushes or merges. Instead, every backend instance checks once an hour (first check one minute after startup) for public sources used by at least one configuration whose rules are older than 24 hours, and refreshes up to three of them; the rest wait for the next check. The lock and staleness check keep each source to one run per window across instances. Target repositories need no schedule: their merged PRs only change when they merge, which already triggers learning. Installed sources also learn on their own merges. Direct pushes without a pull request are never learned from, in any repository.
 
 Consequences of this design:
 
-- **Fresh install.** The App ignores `installation` events, so a newly installed repository has no rules until setup is saved or its first pull request merges. Reviews in the meantime use general best practices. A repository with no merged pull requests cannot be learned yet; the run fails and saves nothing.
-- **No schedule.** If no target that uses a source merges and nobody saves setup, the source's rules are not refreshed, even after 24 hours.
-- **Learned rules are read-only.** The rules API and settings page edit, toggle and delete only custom rules. Learned rules, including a target's own, cannot be disabled or edited; a team that disagrees with one can only add a custom rule. Disabling a learned rule directly would be wrong for public sources because their document is shared, so a future override list should be stored per target repository and matched by normalized rule text. `saveCoventions` already preserves an `enabled` flag across relearns, but nothing sets it yet.
+- **Fresh install.** GitHub sends every App `installation` (action `created`) and `installation_repositories` (action `added`) events. PRHawk learns each added repository right away, one at a time, up to 10 per event; the rest learn on setup or their first merge. A review that arrives during this first run uses general best practices. A repository with no merged pull requests cannot be learned yet; the run fails and saves nothing.
+- **Disabling learned rules.** A learned rule (the target's own or a source's) can be turned off for one target repository. The override is stored on that repository's configuration as `disabledRules`, a list of normalized rule text, not on the learned document, because a public source's document is shared and changing it would affect every installation. Matching by text keeps the rule off when relearning produces it again. If the model words it differently, it is a new rule and starts enabled. Learned rule text cannot be edited, since relearning rewrites it; disable it and add a custom rule instead. A repository can disable at most 500 learned rules.
 - **Shared quality.** A poor learning run for a public source affects every installation that uses it until the next refresh. An empty or failed run keeps the previous rules.
 
 ## 6. Setup and rules-management flow
@@ -308,7 +317,7 @@ Consequences of this design:
 6. The user can add multiple source repositories. Installed sources are checked against installation access. If public sources are enabled, sources without installation access are checked for public visibility.
 7. The backend saves the configuration in MongoDB and starts initial learning in the background.
 8. The rules page displays learned target rules, custom target rules, and learned rules grouped by source.
-9. Custom target rules can be added, edited, enabled/disabled, or deleted.
+9. Custom target rules can be added, edited, enabled/disabled, or deleted. Learned rules, from the target or a source, can be disabled or re-enabled for this target only.
 
 Returning users without a session click **Sign in with GitHub**, which goes through `/api/auth/github/login` (with a random `state` value checked on callback) and the same callback.
 
@@ -396,7 +405,7 @@ The real values in `.env` files and hosting settings are secrets and must not be
 - Malformed model output: retry and then try the next provider.
 - Invalid inline comment positions: filter them before publishing.
 - The frontend is client-rendered, so the site shows only a `<noscript>` message with JavaScript disabled. Reviews on GitHub are unaffected.
-- Learning deduplication is in-memory. With several backend instances, two instances could occasionally learn the same scope at once; a MongoDB lock would be needed to prevent that. The unique indexes still keep one document per scope; the later run's rules win.
+- Learning is deduplicated across instances by a MongoDB lock. A run that takes longer than the 10-minute lock could overlap with another instance's run; the unique indexes still keep one document per scope, and the later run's rules win.
 - Database startup: the server does not listen until MongoDB answers and the unique indexes exist. A wrong `MONGODB_URL`, or duplicate documents from before the indexes existed, stops startup with an error (see `npm run db:dedupe`).- Convention-learning input and output are capped to reduce TPM errors; large repositories may therefore be represented by a sample of recent merged PRs rather than their full history.
 - Anonymous public GitHub API access is subject to unauthenticated rate limits.
 - Sessions are stateless: installation access is captured at sign-in. If a user loses access to an installation, their session keeps it until it expires (7 days) or they sign out. Installing the App on another account signs the user in again automatically.

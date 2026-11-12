@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { MongoClient, MongoServerError } from "mongodb";
 import { config } from "../config.js";
 
@@ -13,6 +14,7 @@ export const COLLECTIONS = {
   conventions: "conventions",
   customConventions: "custom_conventions",
   conventionConfigurations: "convention_configurations",
+  locks: "locks",
 } as const;
 
 /**
@@ -75,6 +77,48 @@ async function ensureIndexes(): Promise<void> {
       throw err;
     }
   }
+  // MongoDB deletes a lock shortly after expiresAt (the TTL monitor runs about once a minute).
+  await db().collection(COLLECTIONS.locks).createIndex(
+    { expiresAt: 1 },
+    { name: "expires_ttl", expireAfterSeconds: 0 },
+  );
+}
+
+interface LockDoc {
+  _id: string;
+  owner: string;
+  expiresAt: Date;
+}
+
+function locksCollection() {
+  return db().collection<LockDoc>(COLLECTIONS.locks);
+}
+
+/**
+ * Takes a lock shared by every backend instance. Returns a release function,
+ * or null when another holder's lock has not expired. A lock past expiresAt
+ * counts as free even before the TTL monitor deletes it, so a crashed holder
+ * blocks others for at most ttlMs.
+ */
+export async function acquireLock(name: string, ttlMs: number): Promise<(() => Promise<void>) | null> {
+  const id = name.toLowerCase();
+  const owner = randomUUID();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + ttlMs);
+  try {
+    await locksCollection().insertOne({ _id: id, owner, expiresAt });
+  } catch (err) {
+    if (!isDuplicateKeyError(err)) throw err;
+    const takenOver = await locksCollection().findOneAndUpdate(
+      { _id: id, expiresAt: { $lte: now } },
+      { $set: { owner, expiresAt } },
+    );
+    if (!takenOver) return null;
+  }
+  return async () => {
+    // Only delete our own lock, in case it expired and someone else took it.
+    await locksCollection().deleteOne({ _id: id, owner });
+  };
 }
 
 /**

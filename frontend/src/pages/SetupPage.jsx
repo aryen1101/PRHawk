@@ -226,7 +226,11 @@ export default function SetupPage() {
 
   async function toggleRule(rule) {
     try {
-      await readJson(await sendJson("/api/github/rules", "PATCH", { installationId, repository: targetRepository, id: rule.id, enabled: rule.enabled === false }));
+      // Learned rules are turned off for this repository only; custom rules are updated directly.
+      const request = rule.kind === "custom"
+        ? sendJson("/api/github/rules", "PATCH", { installationId, repository: targetRepository, id: rule.id, enabled: rule.enabled === false })
+        : sendJson("/api/github/rules/learned", "PATCH", { installationId, repository: targetRepository, rule: rule.rule, enabled: rule.enabled === false });
+      await readJson(await request);
       await loadRepository(targetRepository);
     } catch (err) {
       setError(err.message);
@@ -491,7 +495,7 @@ function RulesPanel({ ruleForm, setRuleForm, saveRule, saving, targetRules, sour
 
   return (
     <div className="tab-panel" role="tabpanel" id="panel-rules" aria-labelledby="tab-rules">
-      <p className="panel-intro">Learned rules are read-only. Custom rules can be added, edited, disabled, or deleted.</p>
+      <p className="panel-intro">Learned rules can be disabled for this repository; other repositories using the same source are not affected. Custom rules can be added, edited, disabled, or deleted.</p>
 
       <form className="rule-form" onSubmit={saveRule}>
         <p className="rule-form-title">{ruleForm.id ? "Edit custom rule" : "Add a custom rule"}</p>
@@ -531,7 +535,7 @@ function RulesPanel({ ruleForm, setRuleForm, saveRule, saving, targetRules, sour
         ) : (
           <ul className="rule-list">
             {targetRules.filter(matches).map((rule) => (
-              <RuleRow key={rule.id || rule.rule} rule={rule} onEdit={() => rule.kind === "custom" && setRuleForm(rule)} onDelete={() => rule.kind === "custom" && deleteRule(rule.id)} onToggle={() => rule.kind === "custom" && toggleRule(rule)} />
+              <RuleRow key={rule.id || rule.rule} rule={rule} onEdit={() => rule.kind === "custom" && setRuleForm(rule)} onDelete={() => rule.kind === "custom" && deleteRule(rule.id)} onToggle={() => toggleRule(rule)} />
             ))}
           </ul>
         )}
@@ -546,7 +550,7 @@ function RulesPanel({ ruleForm, setRuleForm, saveRule, saving, targetRules, sour
             <p className="empty-line">No learned rules yet.</p>
           ) : (
             <ul className="rule-list">
-              {source.rules.filter(matches).map((rule) => <RuleRow key={`${source.repository}-${rule.id || rule.rule}`} rule={rule} />)}
+              {source.rules.filter(matches).map((rule) => <RuleRow key={`${source.repository}-${rule.id || rule.rule}`} rule={rule} onToggle={() => toggleRule(rule)} />)}
             </ul>
           )}
         </div>
@@ -569,14 +573,18 @@ function RuleRow({ rule, onEdit, onDelete, onToggle }) {
           {disabled && <span className="tag tag-off">disabled</span>}
         </p>
       </div>
-      {custom && (
+      {onToggle && (
         <div className="rule-actions">
           <button type="button" className="btn btn-ghost btn-sm" onClick={onToggle}>
             {disabled ? <Power size={15} aria-hidden="true" /> : <PowerOff size={15} aria-hidden="true" />}
             {disabled ? "Enable" : "Disable"}
           </button>
-          <button type="button" className="icon-btn" onClick={onEdit} aria-label="Edit rule"><Pencil size={15} aria-hidden="true" /></button>
-          <button type="button" className="icon-btn icon-btn-danger" onClick={onDelete} aria-label="Delete rule"><Trash2 size={15} aria-hidden="true" /></button>
+          {custom && (
+            <>
+              <button type="button" className="icon-btn" onClick={onEdit} aria-label="Edit rule"><Pencil size={15} aria-hidden="true" /></button>
+              <button type="button" className="icon-btn icon-btn-danger" onClick={onDelete} aria-label="Delete rule"><Trash2 size={15} aria-hidden="true" /></button>
+            </>
+          )}
         </div>
       )}
     </li>
