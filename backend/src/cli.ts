@@ -15,6 +15,7 @@ import { loadConventions } from "./conventions/store.js";
 import { learnConventions } from "./conventions/learner.js";
 import { loadReviewConventions, repositoryScope } from "./conventions/scopes.js";
 import { config } from "./config.js";
+import { initDb } from "./db/index.js";
 
 /**
  * How the CLI reaches a repository and where its rules live. This mirrors the
@@ -168,6 +169,8 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
+
+  await initDb();
 
   if (command === "review") {
     await review(target, options.includes("--dry-run"));

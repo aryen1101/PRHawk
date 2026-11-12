@@ -21,6 +21,7 @@ import type { ConventionSource } from "./conventions/store.js";
 import { learnConventionsIfStale } from "./conventions/learner.js";
 import { loadReviewConventions, normalizeConventionSource, repositoryScope } from "./conventions/scopes.js";
 import { config } from "./config.js";
+import { initDb } from "./db/index.js";
 import {
   getInstallationRepositories,
   getInstallationToken,
@@ -489,4 +490,11 @@ function startServer(): void {
   });
 }
 
-startServer();
+// Connect and create indexes before accepting traffic, so a bad MONGODB_URL
+// or duplicate data fails the deploy instead of the first webhook.
+initDb()
+  .then(startServer)
+  .catch((err) => {
+    console.error("Database setup failed:", err instanceof Error ? err.message : err);
+    process.exit(1);
+  });

@@ -51,7 +51,7 @@ The setup page first asks `/api/auth/me` whether the browser has a session. With
 
 Source: `backend/src/`
 
-`index.ts` starts the API server and wires together webhook handling, GitHub user sign-in (`auth.ts`), setup/configuration APIs, rules APIs, health checks, and optional static frontend serving when a local `frontend/dist` exists.
+`index.ts` connects to MongoDB and creates its indexes (`initDb`), then starts the API server and wires together webhook handling, GitHub user sign-in (`auth.ts`), setup/configuration APIs, rules APIs, health checks, and optional static frontend serving when a local `frontend/dist` exists.
 
 Important endpoints:
 
@@ -131,6 +131,36 @@ Collections:
 | `custom_conventions` | User-authored rules scoped to a target repository |
 | `convention_configurations` | Target repository and its selected convention sources |
 
+#### Indexes and startup
+
+Each collection has a unique index that uses the same case-insensitive collation as the queries:
+
+| Collection | Unique index | Guarantees |
+|---|---|---|
+| `conventions` | `userId` (the scope key) | One learned-rules document per scope |
+| `custom_conventions` | `scope` | One custom-rules document per scope |
+| `convention_configurations` | `installationId` + `repository` | One configuration per installed repository |
+
+The uniqueness is the main purpose of these indexes; faster lookups come with it. Without them, two concurrent upserts for the same key (for example two merged-PR webhooks learning the same repository) could both insert, leaving two documents for one scope. Reads would then return either copy, so a rule disabled in one copy could still be applied from the other. With the indexes, the second insert fails with a duplicate-key error; `upsertWithRetry` in `db/index.ts` retries it once, and the retry updates the document the first upsert created. A query uses an index only when the collations match, which is why the index and the queries share one `CASE_INSENSITIVE` constant.
+
+`initDb()` runs before the server listens and before any CLI command. It connects, pings the server and creates the indexes (`createIndex` does nothing when the index already exists). If the connection string is wrong, or existing data has duplicates, the process exits with an error instead of failing on the first webhook. `npm run db:dedupe` lists duplicate groups, and `npm run db:dedupe -- --fix` merges them:
+
+- learned rules keep the most recently learned copy;
+- custom rules keep every distinct rule from all copies;
+- configurations keep the most recently saved copy.
+
+#### Why MongoDB
+
+PRHawk stores a small amount of configuration, not relational data. Each record is read and written as a whole by one key: the learned rules for a scope, the custom rules for a scope, or one repository's source list. Rules are always loaded together, so embedding them as an array in one document fits the access pattern, and there are no joins, reporting queries or multi-record transactions. MongoDB Atlas's free tier also keeps hosting simple next to Render, with no schema migrations.
+
+PostgreSQL was considered. It would not add a feature today, and moving would mean a schema, migrations and a data copy. The gaps that remained (no indexes, possible duplicate documents, no startup check) were in how the code used MongoDB, and are fixed above. PostgreSQL becomes the better choice if PRHawk adds:
+
+- stored review history, analytics or dashboards (relational, query-heavy data);
+- plans, billing or team accounts with relationships between records;
+- a durable job queue and cross-instance locks in the same database (pg-boss, `SKIP LOCKED`, advisory locks).
+
+MongoDB can also handle a job queue and locks (a locks collection with a TTL index), so those alone do not force a move.
+
 Convention scopes are:
 
 ```text
@@ -155,7 +185,7 @@ The configuration associates each target repository with zero or more sources:
 
 Repository names are case-insensitive on GitHub, so the backend always stores GitHub's canonical `owner/name`: installed repositories take the casing from the installation's repository list, and public sources take `full_name` from the GitHub API. Sources are de-duplicated case-insensitively, and MongoDB lookups on scopes and configurations use a case-insensitive collation (`locale: "en", strength: 2`), so records saved with other casing are still found and are rewritten with canonical casing on the next save.
 
-Each source's learned rules are stored once under its own scope. Removing a source from a target configuration stops using it for that target; it does not delete shared source rules. Custom rules are stored separately so relearning cannot overwrite them. Disabled custom rules remain visible in management but are excluded from review prompts.
+Each source's learned rules are stored once under its own scope. Removing a source from a target configuration stops using it for that target; it does not delete shared source rules. Custom rules are stored separately so relearning cannot overwrite them. Editing a custom rule changes only that rule's fields in a single update (`arrayFilters`), so two edits at the same time on different rules are both kept. Disabled custom rules remain visible in management but are excluded from review prompts.
 
 ### CLI
 
@@ -193,6 +223,8 @@ sequenceDiagram
 ```
 
 Supported review actions are `opened`, `synchronize`, and `reopened`. The backend acknowledges a valid event before running the longer review asynchronously. Failures after acknowledgement are written to backend logs.
+
+A review only reads rules that are already saved in MongoDB (up to `REVIEW_MAX_CONVENTIONS`, 40 by default). It never fetches earlier pull requests or starts learning, however old the saved rules are. The diff and the rules go to the model in one request. If a repository has no rules yet, the prompt tells the model to review against general best practices.
 
 ## 5. Convention learning flow
 
@@ -235,6 +267,36 @@ flowchart TD
 For an installed source, PRHawk uses the GitHub installation token and stores rules under that installation's source scope. For a public source not included in the installation, the setup page must explicitly allow public sources; the backend verifies that the repository is public and reads it anonymously. Private sources require App access.
 
 At review time PRHawk combines enabled target rules, enabled target custom rules, and enabled rules from the target's configured sources. It deduplicates rules by severity and rule text before adding them to the prompt.
+
+### Rule lifecycle in practice
+
+**Reviews read rules; merges, setup saves and the CLI write them.** The staleness windows do not schedule anything: they only decide whether a trigger relearns or keeps the saved rules. A skipped or failed run never deletes rules.
+
+The 10-minute window for the target is counted from the last successful learning run, not from the previous merge. Merges often arrive in bursts (after a review session or before a release), and each run samples the last 10 merged PRs, so a merge a few minutes after the last run would change one sample and return almost the same rules for another model call. Skipped merges are not lost: they are still among the last 10 merged PRs at the next run. For example:
+
+| Time | Event | Result |
+|---|---|---|
+| 10:00 | PR #1 merged | Learned from the last 10 merged PRs |
+| 10:03 | PR #2 merged | Skipped (learned 3 min ago); reviews keep the 10:00 rules |
+| 10:07 | PR #3 merged | Skipped |
+| 10:25 | PR #4 merged | Learned; the sample now includes #2, #3 and #4 |
+
+If PR #3 had been the last merge of the day, #2 and #3 would wait for the next merge. Ten minutes is a chosen default, not a measured value: long enough to treat a burst of merges as one run, short enough to refresh several times on a busy day.
+
+Public sources use one shared scope, `github-public:<owner>/<repo>`, with no installation ID. Every installation that selects the same public repository reads the same document, so it is learned once per 24 hours in total rather than once per user. This saves model calls and the 60 requests per hour that anonymous GitHub access allows (a run uses about 11). After 24 hours, the next of these relearns it for everyone:
+
+- any user (including the same one) saves setup with it as a source;
+- a pull request merges in any target repository that lists it as a source;
+- `npm run learn -- <owner>/<repo>` (ignores the window).
+
+PRHawk is not installed on public sources, so GitHub sends no webhooks for their pushes or merges; new upstream activity is picked up only at the next trigger after the window. Direct pushes without a pull request are never learned from, in any repository.
+
+Consequences of this design:
+
+- **Fresh install.** The App ignores `installation` events, so a newly installed repository has no rules until setup is saved or its first pull request merges. Reviews in the meantime use general best practices. A repository with no merged pull requests cannot be learned yet; the run fails and saves nothing.
+- **No schedule.** If no target that uses a source merges and nobody saves setup, the source's rules are not refreshed, even after 24 hours.
+- **Learned rules are read-only.** The rules API and settings page edit, toggle and delete only custom rules. Learned rules, including a target's own, cannot be disabled or edited; a team that disagrees with one can only add a custom rule. Disabling a learned rule directly would be wrong for public sources because their document is shared, so a future override list should be stored per target repository and matched by normalized rule text. `saveCoventions` already preserves an `enabled` flag across relearns, but nothing sets it yet.
+- **Shared quality.** A poor learning run for a public source affects every installation that uses it until the next refresh. An empty or failed run keeps the previous rules.
 
 ## 6. Setup and rules-management flow
 
@@ -334,8 +396,8 @@ The real values in `.env` files and hosting settings are secrets and must not be
 - Malformed model output: retry and then try the next provider.
 - Invalid inline comment positions: filter them before publishing.
 - The frontend is client-rendered, so the site shows only a `<noscript>` message with JavaScript disabled. Reviews on GitHub are unaffected.
-- Learning deduplication is in-memory. With several backend instances, two instances could occasionally learn the same scope at once; a MongoDB lock would be needed to prevent that.
-- Convention-learning input and output are capped to reduce TPM errors; large repositories may therefore be represented by a sample of recent merged PRs rather than their full history.
+- Learning deduplication is in-memory. With several backend instances, two instances could occasionally learn the same scope at once; a MongoDB lock would be needed to prevent that. The unique indexes still keep one document per scope; the later run's rules win.
+- Database startup: the server does not listen until MongoDB answers and the unique indexes exist. A wrong `MONGODB_URL`, or duplicate documents from before the indexes existed, stops startup with an error (see `npm run db:dedupe`).- Convention-learning input and output are capped to reduce TPM errors; large repositories may therefore be represented by a sample of recent merged PRs rather than their full history.
 - Anonymous public GitHub API access is subject to unauthenticated rate limits.
 - Sessions are stateless: installation access is captured at sign-in. If a user loses access to an installation, their session keeps it until it expires (7 days) or they sign out. Installing the App on another account signs the user in again automatically.
 - GitHub's install-time authorization redirect carries no `state` parameter, so that one path cannot be protected against login CSRF; logins started from the setup page are.
@@ -352,7 +414,9 @@ PRHawk/
 │       ├── auth.ts
 │       ├── cli.ts
 │       ├── config.ts
-│       ├── db/index.ts
+│       ├── db/
+│       │   ├── index.ts       # MongoDB client, unique indexes, startup check
+│       │   └── dedupe.ts      # Finds and merges duplicate documents
 │       ├── github/
 │       │   ├── appAuth.ts
 │       │   ├── client.ts

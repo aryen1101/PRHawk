@@ -42,7 +42,7 @@ The CLI remains available for maintainers who want local dry runs or administrat
 - OpenAI-first with Groq fallback
 - Landing page with a real example review, and a settings page for sources and rules
 - CLI for dry runs and local workflows
-- MongoDB persistence for installation/repository conventions
+- MongoDB persistence for installation/repository conventions, with unique indexes that keep one record per repository
 - No personal GitHub tokens required for normal App users
 
 ## Project structure
@@ -60,6 +60,7 @@ PRHawk/
 │       │   └── reviewPublishers.ts  # Posts GitHub reviews and failure comments
 │       ├── review/                  # Prompts, schemas, file filter, and review engine
 │       ├── conventions/             # Learned conventions, scopes, and MongoDB store
+│       ├── db/                      # MongoDB client, unique indexes, duplicate cleanup
 │       └── llm/                     # OpenAI/Groq-compatible completion flow
 ├── frontend/
 │   ├── vercel.json                  # Proxies /api to Render; SPA routes
@@ -150,6 +151,20 @@ For local testing, expose port `3000` with an HTTPS tunnel such as ngrok, then u
 ```text
 https://YOUR_TUNNEL_HOST/api/github/webhook
 ```
+
+## Database
+
+PRHawk uses MongoDB (database `pr_hawk`). On startup, the server and the CLI connect, ping the database and create unique indexes, so each repository has exactly one record of learned rules, custom rules and configuration. If `MONGODB_URL` is wrong, startup stops with an error instead of the first webhook failing.
+
+If index creation fails because older data has duplicate records, list and merge them:
+
+```powershell
+cd backend
+npm.cmd run db:dedupe            # report only
+npm.cmd run db:dedupe -- --fix   # merge duplicates, then restart the server
+```
+
+See [architecture.md](architecture.md#indexes-and-startup) for what each index guarantees and why PRHawk uses MongoDB rather than PostgreSQL.
 
 ## Run locally
 

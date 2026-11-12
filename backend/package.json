@@ -7,7 +7,8 @@
     "start": "tsx src/index.ts",
     "review": "tsx src/cli.ts review",
     "learn": "tsx src/cli.ts learn",
-    "cli": "tsx src/cli.ts"
+    "cli": "tsx src/cli.ts",
+    "db:dedupe": "tsx src/db/dedupe.ts"
   },
   "keywords": [],
   "author": "",

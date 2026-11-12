@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ConventionRule } from "../types.js";
-import { client } from "../db/index.js";
+import { CASE_INSENSITIVE, COLLECTIONS, db, upsertWithRetry } from "../db/index.js";
 
 interface ConventionsDoc {
   userId: string;
@@ -33,23 +33,16 @@ interface CustomConventionsDoc {
   rules: ConventionRule[];
 }
 
-/**
- * Repository names are case-insensitive on GitHub. Matching scopes and
- * configurations case-insensitively finds records saved with different casing;
- * writes then store the canonical casing.
- */
-const CASE_INSENSITIVE = { locale: "en", strength: 2 } as const;
-
 function conventionsCollection() {
-  return client.db("pr_hawk").collection<ConventionsDoc>("conventions");
+  return db().collection<ConventionsDoc>(COLLECTIONS.conventions);
 }
 
 function configurationCollection() {
-  return client.db("pr_hawk").collection<ConventionConfiguration>("convention_configurations");
+  return db().collection<ConventionConfiguration>(COLLECTIONS.conventionConfigurations);
 }
 
 function customConventionsCollection() {
-  return client.db("pr_hawk").collection<CustomConventionsDoc>("custom_conventions");
+  return db().collection<CustomConventionsDoc>(COLLECTIONS.customConventions);
 }
 
 function withRuleMetadata(rule: ConventionRule, kind: "learned" | "custom"): ConventionRule {
@@ -111,11 +104,11 @@ export async function saveCoventions(
     ));
   }
 
-  await conventionsCollection().updateOne(
+  await upsertWithRetry(() => conventionsCollection().updateOne(
     { userId },
     { $set: { userId, rules: normalizedRules, learnedAt: new Date() } },
     { upsert: true, collation: CASE_INSENSITIVE },
-  );
+  ));
   return normalizedRules;
 }
 
@@ -128,11 +121,11 @@ export async function getLearningState(userId: string): Promise<LearningState> {
 }
 
 export async function markLearningAttempt(userId: string): Promise<void> {
-  await conventionsCollection().updateOne(
+  await upsertWithRetry(() => conventionsCollection().updateOne(
     { userId },
     { $set: { userId, attemptedAt: new Date() }, $setOnInsert: { rules: [] } },
     { upsert: true, collation: CASE_INSENSITIVE },
-  );
+  ));
 }
 
 export async function loadConventionConfiguration(
@@ -147,7 +140,7 @@ export async function saveConventionConfiguration(
   repository: string,
   conventionSources: ConventionSource[] | string[],
 ): Promise<void> {
-  await configurationCollection().updateOne(
+  await upsertWithRetry(() => configurationCollection().updateOne(
     { installationId, repository },
     {
       $set: {
@@ -158,7 +151,7 @@ export async function saveConventionConfiguration(
       },
     },
     { upsert: true, collation: CASE_INSENSITIVE },
-  );
+  ));
 }
 
 export async function addCustomConvention(
@@ -166,11 +159,11 @@ export async function addCustomConvention(
   rule: Omit<ConventionRule, "id" | "kind">,
 ): Promise<ConventionRule> {
   const customRule = withRuleMetadata(rule, "custom");
-  await customConventionsCollection().updateOne(
+  await upsertWithRetry(() => customConventionsCollection().updateOne(
     { scope },
     { $set: { scope }, $push: { rules: customRule } },
     { upsert: true, collation: CASE_INSENSITIVE },
-  );
+  ));
   return customRule;
 }
 
@@ -179,17 +172,23 @@ export async function updateCustomConvention(
   id: string,
   update: Partial<Pick<ConventionRule, "rule" | "rationale" | "severity" | "enabled">>,
 ): Promise<ConventionRule | null> {
-  const doc = await customConventionsCollection().findOne({ scope }, { collation: CASE_INSENSITIVE });
-  const index = doc?.rules.findIndex((rule) => rule.id === id) ?? -1;
-  if (index < 0 || !doc) return null;
-  const updated = { ...doc.rules[index], ...update, kind: "custom" as const };
-  doc.rules[index] = updated;
-  await customConventionsCollection().updateOne(
-    { scope },
-    { $set: { rules: doc.rules } },
-    { collation: CASE_INSENSITIVE },
+  // Set only the changed fields of the matching rule, in one atomic update.
+  // Writing back the whole array would overwrite a concurrent edit to another rule.
+  const fields: Record<string, unknown> = { "rules.$[target].kind": "custom" };
+  for (const [field, value] of Object.entries(update)) {
+    if (value !== undefined) fields[`rules.$[target].${field}`] = value;
+  }
+  const doc = await customConventionsCollection().findOneAndUpdate(
+    { scope, "rules.id": id },
+    { $set: fields },
+    {
+      arrayFilters: [{ "target.id": id }],
+      collation: CASE_INSENSITIVE,
+      returnDocument: "after",
+      projection: { rules: { $elemMatch: { id } } },
+    },
   );
-  return updated;
+  return doc?.rules[0] ?? null;
 }
 
 export async function deleteCustomConvention(scope: string, id: string): Promise<boolean> {
